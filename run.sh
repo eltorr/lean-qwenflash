@@ -81,7 +81,6 @@ fi
 CG="/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup | head -1)"
 [ -f "$CG/memory.current" ] && export QWEN_MEMORY_CGROUP="$CG"
 
-[ -f /etc/profile.d/cuda.sh ] && source /etc/profile.d/cuda.sh
 [ -f .venv/bin/activate ] || { echo "no .venv here: run setup/20_env.sh first"; exit 2; }
 source .venv/bin/activate
 # load the offload kernels compile_local.py built directly; torch's JIT up-to-date check stats thousands of headers

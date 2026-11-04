@@ -42,7 +42,8 @@ case "${1:-}" in
       ram=""
       for e in "${envs[@]}"; do case "$e" in RAM_GB=*) ram=${e#RAM_GB=} ;; esac; done
       base=(--quiet --unit="$UNIT" --collect -p WorkingDirectory="$PWD" -p KillMode=control-group
-            -p TimeoutStopSec=30 -p StandardOutput=append:"$PWD/$LOG" -p StandardError=append:"$PWD/$LOG")
+            -p TimeoutStopSec=30 -p StandardOutput=append:"$PWD/$LOG" -p StandardError=append:"$PWD/$LOG"
+            -p LimitMEMLOCK=infinity -p LimitNOFILE=1048576)   # pinned host memory; many O_DIRECT readers
       # services start with a bare environment: keep the caller's PATH (WSL's nvidia-smi is in /usr/lib/wsl/lib)
       # and HOME (torch/Triton kernel caches live there)
       setenv=(--setenv=PATH="$PATH" --setenv=HOME="${HOME:-/root}")
