@@ -32,7 +32,10 @@ from .setup import Setup
 sys.path.insert(0, str(REPO))
 import sizing  # noqa: E402
 
-RAM_OVERHEAD = 6.5 * GB          # measured: server process + torch + page cache on top of the expert RAM tier
+# RAM the model uses beyond its expert RAM tier (process, torch, page cache; under WSL also the VM's own share).
+# A first guess per platform; after each start the manager measures the real figure and uses that from then on.
+RAM_OVERHEAD = {"linux": 6.5 * GB, "windows-wsl": 9.0 * GB}
+RAM_GRACE_S = 90                 # after a start, page cache from loading takes a while to be handed back
 UI_FILE = REPO / "qwenflash" / "ui" / "index.html"
 OOM_VRAM = re.compile(r"out of memory|OutOfMemoryError|VRAM LIMIT EXCEEDED|Insufficient VRAM|cudaErrorMemoryAllocation",
                       re.I)
@@ -48,6 +51,7 @@ class Backend:
         self.own_vram = self.ram_gib = self.budget = None
         self.plan = None
         self.adopted = False
+        self.ram_measured = True
 
     def set(self, state):
         self.state = state
@@ -90,6 +94,8 @@ class Service:
         self.last_request = self.last_done = None
         self.override_until = 0.0
         self.paused_reason = None
+        self.ram_before_start = None
+        self.manual_lean = False
         self.ext_at_start = self.perproc_at_start = None
         self.pressure = {"level": "none", "reasons": []}
         self.sev_since = self.mod_since = self.clear_since = None
@@ -160,7 +166,7 @@ class Service:
     def own_ram_estimate(self):
         if self.be.state != "running" or not self.be.tier:
             return 0.0
-        return (self.be.ram_gib or self.cfg["lean_ram_gb"]) * GIB + RAM_OVERHEAD
+        return (self.be.ram_gib or self.cfg["lean_ram_gb"]) * GIB + self.ram_overhead()
 
     def ram_spare(self, m, reserve_gb=None):
         reserve = (reserve_gb if reserve_gb is not None else self.cfg["ram_reserve_gb"]) * GB
@@ -178,11 +184,31 @@ class Service:
         if cap:
             need = min(need, cap)
         # keep free RAM after the start clearly above the scale-back threshold, or full -> lean -> full would loop
-        spare = self.ram_spare(m, max(cfg["ram_reserve_gb"], cfg["ram_lean_gb"] + 3)) - RAM_OVERHEAD
+        spare = self.ram_spare(m, max(cfg["ram_reserve_gb"], cfg["ram_lean_gb"] + 3)) - self.ram_overhead()
         return int(max(cfg["lean_ram_gb"], min(need, spare // GIB)))
 
     def ram_need_lean(self):
-        return self.cfg["lean_ram_gb"] * GIB + RAM_OVERHEAD
+        return self.cfg["lean_ram_gb"] * GIB + self.ram_overhead()
+
+    def ram_overhead(self):
+        learned = self.learned.get("_ram_overhead", {}).get(f"{self.host.kind}|{self.cfg['quant']}")
+        return learned if learned else RAM_OVERHEAD.get(self.host.kind, 8 * GB)
+
+    def measure_ram_overhead(self, m):
+        """Once the model has settled after a start: what it really took from the host beyond its RAM tier."""
+        self.be.ram_measured = True
+        if self.ram_before_start is None or not self.be.ram_gib:
+            return
+        over = (self.ram_before_start - m["ram_avail"]) - self.be.ram_gib * GIB
+        if not 1 * GB < over < 30 * GB:
+            return              # other apps changed a lot meanwhile: not a usable measurement
+        key = f"{self.host.kind}|{self.cfg['quant']}"
+        store = self.learned.setdefault("_ram_overhead", {})
+        prev = store.get(key)
+        store[key] = over if prev is None else 0.5 * prev + 0.5 * over
+        config.save_json("learned.json", self.learned)
+        self.event("learned", f"the model uses {over / GB:.1f} GB of RAM beyond its {self.be.ram_gib} GiB cache; "
+                              f"sizing the RAM cache with {store[key] / GB:.1f} GB from now on")
 
     def best_tier(self, m, level=None):
         """Biggest profile that fits right now (respecting current pressure)."""
@@ -207,9 +233,12 @@ class Service:
         hits = sorted({w.lower() for w in cfg["watchlist"]} & m["running"])
         if hits:
             sev.append("watched app running: " + ", ".join(hits))
-        if m["ram_avail"] < cfg["ram_pause_gb"] * GB:
+        # right after a start, page cache from loading is still being handed back: only a real emergency counts
+        settling = self.be.state == "starting" or (self.be.state == "running" and self.be.ready_at
+                                                   and time.time() - self.be.ready_at < RAM_GRACE_S)
+        if m["ram_avail"] < (1.0 if settling else cfg["ram_pause_gb"]) * GB:
             sev.append(f"RAM very low ({m['ram_avail'] / GB:.1f} GB free)")
-        elif m["ram_avail"] < cfg["ram_lean_gb"] * GB:
+        elif m["ram_avail"] < cfg["ram_lean_gb"] * GB and not settling:
             mod.append(f"RAM low ({m['ram_avail'] / GB:.1f} GB free)")
         if self.be.state in ("running", "starting") and self.ext_at_start is not None:
             grew = ext - self.ext_at_start
@@ -279,6 +308,8 @@ class Service:
             self.be.set("error")
             self.event("error", self.be.error)
             return False
+        self.ram_before_start = m["ram_avail"]
+        self.be.ram_measured = False
         self.ext_at_start, self.perproc_at_start = self.ext_vram(m), m["perproc_ded"]
         if m.get("ext_vram_abs") is None:
             self.ext_at_start = m["vram_used"]
@@ -754,6 +785,7 @@ class Service:
             "served_name": SERVED_NAME, "since": self.be.since, "startup_s": self.be.startup_s,
             "error": self.be.error, "paused_reason": self.paused_reason, "ram_cache_gib": self.be.ram_gib,
             "budget_gb": round(self.be.budget / GB, 1) if self.be.budget else None, "adopted": self.be.adopted,
+            "manual_lean": self.manual_lean, "ram_overhead_gb": round(self.ram_overhead() / GB, 1),
             "in_flight": self.in_flight, "held": self.held, "served": self.served, "failed": self.failed,
             "last_request": self.last_request,
             "idle_s": (now - self.last_done) if self.last_done and not self.in_flight else None,
@@ -862,8 +894,11 @@ class Service:
             return 409, {"ok": False, "message": "observe mode: this manager does not control the model"}
         msg = None
         if a in ("start_full", "start_lean"):
+            # a lean start chosen by hand stays lean until you choose otherwise (no automatic re-saturation)
+            self.manual_lean = a == "start_lean"
             ok = self.spawn(self.start(a.split("_")[1], "started from dashboard"))
         elif a == "pause":
+            self.manual_lean = False
             ok = self.spawn(self.stop("paused from dashboard", "manual"))
         elif a == "restart":
             ok = self.spawn(self.restart(self.be.tier or "full", "restarted from dashboard"))
@@ -951,6 +986,7 @@ class Service:
             if (tier == "full" and self.mod_since and now - self.mod_since >= cfg["moderate_after_s"]
                     and idle and not overridden):
                 why = "pressure: " + "; ".join(reasons)
+                self.manual_lean = False
                 if cfg["pressure_response"] == "lean" and self.best_tier(m, level="moderate") == "lean":
                     self.spawn(self.restart("lean", why))
                 else:
@@ -958,7 +994,10 @@ class Service:
                 return
             # Re-saturate lean -> full. A busy agent never leaves a 10 s idle gap, so don't wait for one: once lean
             # has run 2 min with no pressure, restart between requests (requests arriving meanwhile are held).
-            if (tier == "lean" and cfg["upgrade_when_idle"] and self.clear_since
+            if (self.be.ready_at and not self.be.ram_measured and now - self.be.ready_at > RAM_GRACE_S
+                    and self.in_flight == 0):
+                self.measure_ram_overhead(m)
+            if (tier == "lean" and cfg["upgrade_when_idle"] and not self.manual_lean and self.clear_since
                     and now - self.clear_since >= cfg["recover_after_s"] and self.in_flight == 0 and dwell_ok
                     and (idle or now - (self.be.ready_at or now) >= 120)
                     and self.best_tier(m, level="none") == "full"):

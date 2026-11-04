@@ -303,6 +303,7 @@ function renderStatus() {
   if (S.state === "running") $("stateText").textContent = label;
   const q = S.quants[S.quant] ? S.quants[S.quant].label : S.quant;
   let meta = `<b>${q}</b> · ${Math.round(S.context / 1024)}K context`;
+  if (S.state === "running" && S.manual_lean && S.tier === "lean") meta += " · chosen by hand: stays lean until you start full";
   if (S.state === "running") meta += ` · ${sub}${S.budget_gb ? ` · <b>${S.budget_gb} GB</b> VRAM budget` : ""}${S.ram_cache_gib != null ? ` · ${S.ram_cache_gib} GiB RAM cache` : ""} · up ${dur(S.now - S.since)}${S.adopted ? " · kept across a manager restart" : S.startup_s ? ` · started in ${dur(S.startup_s)}` : ""}`;
   else if (S.state === "starting") meta += ` · starting ${S.tier} for ${dur(S.now - S.since)} (usually ~1 min)`;
   else if (S.state === "stopped") meta += ` · ${PAUSE_WHY[S.paused_reason] || "not loaded"}${S.idle_s != null ? "" : ""}`;
