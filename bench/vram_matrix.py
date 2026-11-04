@@ -149,7 +149,8 @@ def one(quant, usable_gb, context, port, out_dir, nostage=False):
                # a little slack for the desktop changing its own use during the run
                f"QWEN_VRAM_GUARD_BYTES={int(used0 + usable + 0.25 * GB)}"]
         if nostage:
-            env += ["QWEN_CHUNK=1536", "QWEN38_EC_STAGE_GB=0", "QWEN38_EC_ELASTIC_GB=0", "QWEN38_EC_RESERVE_GB=0.35"]
+            r_gb = sizing.nostage_reserve(quant, 1536) / GIB
+            env += ["QWEN_CHUNK=1536", "QWEN38_EC_STAGE_GB=0", "QWEN38_EC_ELASTIC_GB=0", f"QWEN38_EC_RESERVE_GB={r_gb:.2f}"]
         rec["ram_gib"] = ram_gib
         t0 = time.time()
         r = backend("start", *env, "--", "server")

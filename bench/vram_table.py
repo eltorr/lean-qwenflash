@@ -15,30 +15,27 @@ def fmt(v, spec="{:.1f}", none="-"):
 
 
 def main(d):
-    rows = []
-    for p in sorted(Path(d).glob("*.json")):
-        r = json.loads(p.read_text())
-        rows.append(r)
-    rows.sort(key=lambda r: (r["quant"], -r["usable_gb_target"], r["context"]))
-    print("| Card class | Quant | VRAM for the model | Context | Prefill chunk | Cached experts | Expert picks from VRAM / RAM / NVMe "
-          "| Decode, median (min) | Prefill (prompt) | First token, short | Startup |")
+    rows = [json.loads(p.read_text()) for p in sorted(Path(d).glob("*.json"))]
+    rows.sort(key=lambda r: (r["quant"], -r["usable_gb"], r["context"]))
+    print("| Card | Quant | VRAM for the model | Context | Prefill chunk | Cached experts | Expert picks VRAM / RAM / NVMe "
+          "| Decode, median (min) | Prefill | First token | Startup |")
     print("|---|---|---|---|---|---|---|---|---|---|---|")
     for r in rows:
         e, plan, long = r.get("engine") or {}, r.get("plan") or {}, r.get("long") or {}
-        if r.get("error") and not r.get("decode_tps_median"):
-            print(f"| {card_class(r['usable_gb_target'])} | {r['quant']} | {r['free_at_start_gb']} GB | "
-                  f"{r['context'] // 1024}K | {plan.get('chunk') or ('1536 (no staging)' if r.get('nostage') else '-')} | - | - | "
-                  f"**does not run**: {str(r['error']).splitlines()[0][:110]} | - | - | {fmt(r.get('startup_s'), '{:.0f} s')} |")
+        chunk = "1,536, no staging" if r.get("nostage") or plan.get("staging") is False else f"{plan.get('chunk') or 0:,}"
+        head = (f"| {card_class(r['usable_gb'])} | {r['quant']} | {r['usable_gb']:g} GB | {r['context'] // 1024}K | "
+                f"{chunk if plan.get('ok') or r.get('nostage') else '-'} |")
+        if not r.get("decode_tps_median"):
+            why = str(r.get("error") or "no result").splitlines()[0][:120]
+            print(f"{head} - | - | **does not run**: {why} | - | - | {fmt(r.get('startup_s'), '{:.0f} s')} |")
             continue
-        picks = (f"{e.get('picks_vram_pct')} / {e.get('picks_ram_pct')} / {e.get('picks_nvme_pct')} %"
+        picks = (f"{e['picks_vram_pct']:.0f} / {e['picks_ram_pct']:.0f} / {e['picks_nvme_pct']:.0f} %"
                  if e.get("picks_vram_pct") is not None else "-")
-        chunk = "1536 (no staging)" if r.get("nostage") else plan.get("chunk")
-        print(f"| {card_class(r['usable_gb_target'])} | {r['quant']} | {r['free_at_start_gb']} GB "
-              f"(used {fmt(r.get('model_vram_after_gb'))}) | {r['context'] // 1024}K | {chunk} | {e.get('slots')} | {picks} | "
-              f"**{fmt(r.get('decode_tps_median'))}** ({fmt(r.get('decode_tps_min'))}) tok/s | "
-              f"{fmt(long.get('prefill_tps'), '{:,.0f}')} tok/s ({long.get('prompt_tokens', '-'):,} tok"
-              f"{', needle ok' if long.get('needle_found') else ', NEEDLE MISSED' if long else ''}) | "
-              f"{fmt(r.get('short_ttft_median_s'), '{:.2f} s')} | {fmt(r.get('startup_s'), '{:.0f} s')} |")
+        prefill = (f"{long['prefill_tps']:,.0f} tok/s ({long['prompt_tokens'] // 1000}K prompt"
+                   f"{'' if long.get('needle_found') else ', needle missed'})" if long.get("prefill_tps") else "-")
+        print(f"{head} {e.get('slots', '-'):,} | {picks} | **{fmt(r['decode_tps_median'])}** "
+              f"({fmt(r.get('decode_tps_min'))}) tok/s | {prefill} | {fmt(r.get('short_ttft_median_s'), '{:.2f} s')} | "
+              f"{fmt(r.get('startup_s'), '{:.0f} s')} |")
 
 
 if __name__ == "__main__":

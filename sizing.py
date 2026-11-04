@@ -11,10 +11,11 @@ Where VRAM goes (code refs: qwen38-flash-offload/qwen38/expert_cache.py, nv2.py;
             the reserve plus cache chunks the elastic cache lends back during prefill, so they are not extra.
 A plan fits when fixed + cache + reserve <= budget and cache + reserve - 0.35 GB >= prefill(chunk).
 
-Calibration: fixed is fitted to the RTX 5090 measurement (VRAM used outside the expert cache at 262,144 context:
-9.6 GB at 3.05 bpw, 10.0 GB at 4.05 bpw) with the KV cost per token from the cache layout. Activations per chunk
-token come from the RTX 4090 research runs (a 24,576-token chunk fit with a 16 GB cap; research/4090-long).
-Below 12 GB nothing has been measured yet: plans there are marked experimental.
+Calibration (research/vram-scaling): VRAM used outside the expert cache measured 9.0 GB (3.05 bpw) and 9.44 GB
+(4.05 bpw) at 262,144 context and 6.85 GB at 64K (3.05), i.e. 6.15 / 6.62 GB plus the KV cache's 10,752 bytes per
+token; an 8 GB-class run used 6.39 GB at 16K. Activations per chunk token come from the RTX 4090 research runs (a
+24,576-token chunk fit with a 16 GB cap; research/4090-long). The reserves include ~0.3 GB of margin found by
+running long prompts on emulated 8-16 GB cards.
 """
 import argparse
 import json
@@ -33,9 +34,9 @@ KV_BYTES_PER_TOKEN = {2: 7_680, 4: 10_752, 8: 16_896, 16: 28_416}
 
 QUANTS = {
     # rec: one expert record (gate + up + down trellis, 256-aligned); fixed0: non-expert VRAM at zero context
-    "3.05": {"rec": 1_843_200, "fixed0": 6.78 * GB, "model_dir": "model", "store": "store/qwen.bin",
+    "3.05": {"rec": 1_843_200, "fixed0": 6.15 * GB, "model_dir": "model", "store": "store/qwen.bin",
              "branch": "3.05bpw_h5_ng5", "download_gb": 85, "store_gb": 47, "label": "3.05 bpw (fastest)"},
-    "4.05": {"rec": 2_457_600, "fixed0": 7.18 * GB, "model_dir": "model-4.05", "store": "store/qwen405.bin",
+    "4.05": {"rec": 2_457_600, "fixed0": 6.62 * GB, "model_dir": "model-4.05", "store": "store/qwen405.bin",
              "branch": "4.05bpw_h6_ng6", "download_gb": 107, "store_gb": 62, "label": "4.05 bpw (higher fidelity)"},
 }
 
@@ -58,8 +59,13 @@ def prefill_bytes(quant, chunk, staging=True):
 
 
 def reserve_bytes(budget):
-    """Free VRAM kept after the cache: 1.7 GB (upstream default) on big cards, down to 0.7 GB on 12 GB ones."""
-    return min(1.7 * GB, max(0.7 * GB, 0.06 * budget))
+    """Free VRAM kept after the cache: 1.7 GB (upstream default) on big cards, down to 0.9 GB on 12 GB ones.
+    (0.4-0.87 GB let long prompts overrun emulated 12-16 GB cards by 20-80 MB.)"""
+    return min(1.7 * GB, max(0.9 * GB, 0.06 * budget))
+
+
+def nostage_reserve(quant, chunk):
+    return max(0.7 * GB, prefill_bytes(quant, chunk, staging=False) + 0.2 * GB)
 
 
 def plan(quant, budget, context=262144, kv_bits=4, chunk=None, max_slots=None):
@@ -88,8 +94,12 @@ def plan(quant, budget, context=262144, kv_bits=4, chunk=None, max_slots=None):
             return out
     # staging-free fallback: every miss is read zero-copy from pinned RAM (supported by nv2, not yet measured)
     c = min(chunk or NO_STAGE_CHUNK, NO_STAGE_CHUNK)
-    if budget >= fixed + 0.4 * GB and room >= prefill_bytes(quant, c, staging=False):
-        out.update(chunk=c, staging=False, ok=True, experimental=True, reserve=min(reserve, 0.4 * GB))
+    r = nostage_reserve(quant, c)
+    if budget >= fixed + r:
+        cache = max(0.0, budget - fixed - r)
+        slots = int(cache // rec) // 32 * 32
+        out.update(chunk=c, staging=False, ok=True, experimental=True, reserve=r, slots=slots, cache=slots * rec,
+                   ram_for_all_experts=max(0.0, expert_bytes(quant) - slots * rec))
         return out
     out["reason"] = (f"{budget / GB:.1f} GB is not enough at {context // 1024}K context: the model needs about "
                      f"{fixed / GB:.1f} GB before any expert cache, and {out['min_budget'] / GB:.1f} GB in total")
@@ -128,10 +138,10 @@ def engine_env(p, cap_slots=False):
         env.update({"QWEN38_EC_STAGE_GB": "0", "QWEN38_EC_ELASTIC_GB": "0",
                     "QWEN38_EC_RESERVE_GB": f"{p['reserve'] / GIB:.2f}"})
     elif p["budget"] < SMALL_CARD:
-        # small cards: lend the whole cache back for prefill if needed, and estimate activations realistically
+        # small cards: a smaller reserve, and the whole cache may be lent back for prefill if needed (the engine's
+        # own activation estimate stays: 0.25 MB/token let a 4.05 prefill overrun an emulated 16 GB card)
         env.update({"QWEN38_EC_RESERVE_GB": f"{p['reserve'] / GIB:.2f}",
-                    "QWEN38_EC_ELASTIC_GB": f"{max(6.0, p['cache'] / GIB + 1):.1f}",
-                    "QWEN38_EC_ACT_MB_PER_TOK": "0.25"})
+                    "QWEN38_EC_ELASTIC_GB": f"{max(6.0, p['cache'] / GIB + 1):.1f}"})
     return env
 
 
