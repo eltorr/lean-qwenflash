@@ -17,6 +17,12 @@
 !/sizing.py
 !/run.sh
 !/bin/
+!/setup/
+!/docs/
+!/qwenflash/
+!/bench/
+!/QwenFlash.cmd
+!/qwenflash.sh
 /test_qwen_thinking.py
 !/tests/
 !/exllamav3/
