@@ -1,4 +1,8 @@
-"""Markdown table from vram_matrix.py results: python bench/vram_table.py research/vram-scaling/results"""
+"""Tables from vram_matrix.py results.
+
+  python bench/vram_table.py research/vram-scaling/results            markdown table for the report
+  python bench/vram_table.py --sizing research/vram-scaling/results   rows for sizing.MEASURED (README presets)
+"""
 import json
 import sys
 from pathlib import Path
@@ -41,5 +45,27 @@ def main(d):
               f"{fmt(r.get('startup_s'), '{:.0f} s')} |")
 
 
+def sizing_rows(d):
+    """One sizing.MEASURED entry per completed run (edit gpu/ram if the defaults don't describe the machine)."""
+    for p in sorted(Path(d).glob("*.json")):
+        r = json.loads(p.read_text())
+        long = r.get("long") or {}
+        if r.get("error") or not r.get("decode_tps_median") or not long.get("prefill_tps"):
+            continue
+        h, plan = r.get("host") or {}, r.get("plan") or {}
+        uncapped = r.get("method") == "uncapped card"
+        card = round(r["card_total_gb"] * 1e9 / 2**30) if uncapped else int(card_class(r["usable_gb"]).split()[0])
+        display = h.get("display") if uncapped else card > 8 or r["usable_gb"] < 7.5
+        ram = round(h["ram_total_gb"] * 1e9 / 2**30) if h.get("ram_total_gb") else None
+        gpu = (h.get("gpu") or "?").replace("NVIDIA GeForce ", "") + ("" if uncapped else ", capped")
+        extra = ("" if display is not False else "display=False, ") + \
+                ("" if plan.get("staging", True) and not r.get("nostage") else "staging=False, ")
+        print(f'    dict(card={card}, {extra}quant="{r["quant"]}", context={r["context"]}, '
+              f'ram_cache_gib={r.get("ram_gib")}, decode={r["decode_tps_median"]:.1f}, '
+              f'prefill={long["prefill_tps"]:.0f}, ram={ram}, '
+              f'platform="{h.get("platform", "linux")}", gpu="{gpu}", source="{d}"),')
+
+
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "research/vram-scaling/results")
+    args = [a for a in sys.argv[1:] if a != "--sizing"]
+    (sizing_rows if "--sizing" in sys.argv else main)(args[0] if args else "research/vram-scaling/results")

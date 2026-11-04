@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-os.environ.setdefault("QWENFLASH_HOME", tempfile.mkdtemp(prefix="qf-test-"))
+os.environ["QWENFLASH_HOME"] = tempfile.mkdtemp(prefix="qf-test-")      # never a real settings dir
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from qwenflash import config  # noqa: E402
 from qwenflash.httpio import StreamStats  # noqa: E402

@@ -48,6 +48,61 @@ This fork adds a manager and makes the engine size itself to the machine it runs
 Guides: [manager](docs/manager.md) · [API](docs/api.md) · [VRAM scaling results](research/vram-scaling/REPORT.md) ·
 [multi-GPU notes](docs/research/multi-gpu.md).
 
+### Presets: a baseline from VRAM and RAM
+
+The manager starts from a preset for the card, the RAM and the platform: quant, context window, RAM cache, and its
+own RAM thresholds. A new install applies it. Later, the dashboard offers it as a recommendation when your settings
+differ. `./qwenflash.sh plan` shows your machine's preset; `python3 sizing.py baseline --vram-gb 24 --ram-gb 128`
+shows any machine's.
+
+Linux, with the card also driving the desktop (except where the 8 GB rows say otherwise). Each cell: quant ·
+context, then the RAM cache and how much of the model it keeps in memory (VRAM + RAM). *Italics:* measured
+generation speed of that configuration (chart below).
+
+<!-- presets:begin -->
+| Card (VRAM) | 16 GB RAM | 32 GB RAM | 64 GB RAM | 128 GB RAM |
+|---|---|---|---|---|
+| **8 GB, no display** | **3.05** · 16K, no staging<br>4 GiB RAM cache, 10% in memory | **3.05** · 16K, no staging<br>15 GiB RAM cache, 36% in memory | **3.05** · 16K, no staging<br>42 GiB RAM cache, all in memory<br>*20.2 tok/s* | **3.05** · 16K, no staging<br>42 GiB RAM cache, all in memory<br>*20.2 tok/s* |
+| **8 GB, with display** | not enough VRAM | not enough VRAM | not enough VRAM | not enough VRAM |
+| **12 GB** | **3.05** · 64K, no staging<br>4 GiB RAM cache, 15% in memory | **3.05** · 64K, no staging<br>15 GiB RAM cache, 41% in memory | **3.05** · 64K, no staging<br>40 GiB RAM cache, all in memory | **3.05** · 64K, no staging<br>40 GiB RAM cache, all in memory |
+| **16 GB** | **3.05** · 256K<br>4 GiB RAM cache, 18% in memory | **3.05** · 256K<br>15 GiB RAM cache, 44% in memory | **3.05** · 256K<br>39 GiB RAM cache, all in memory<br>*37.8 tok/s* | **3.05** · 256K<br>39 GiB RAM cache, all in memory<br>*37.8 tok/s* |
+| **24 GB** | **3.05** · 256K<br>4 GiB RAM cache, 34% in memory | **3.05** · 256K<br>15 GiB RAM cache, 60% in memory | **4.05** · 256K<br>45 GiB RAM cache, all in memory<br>*42.6 tok/s* | **4.05** · 256K<br>47 GiB RAM cache, all in memory<br>*42.6 tok/s* |
+| **32 GB** | **3.05** · 256K<br>4 GiB RAM cache, 51% in memory | **3.05** · 256K<br>15 GiB RAM cache, 77% in memory | **4.05** · 256K<br>40 GiB RAM cache, all in memory<br>*56.1 tok/s* | **4.05** · 256K<br>40 GiB RAM cache, all in memory<br>*56.1 tok/s* |
+| **48 GB** | **3.05** · 256K<br>4 GiB RAM cache, 89% in memory | **3.05** · 256K<br>9 GiB RAM cache, all in memory | **4.05** · 256K<br>24 GiB RAM cache, all in memory | **4.05** · 256K<br>24 GiB RAM cache, all in memory |
+<!-- presets:end -->
+
+- **Quant:** 4.05 bpw (higher fidelity) where it keeps 256K context, full-speed prompt processing and nearly every
+  expert in VRAM or RAM. Otherwise 3.05 bpw: its experts are 25% smaller, so it is faster at every card size.
+- **Context:** the largest that keeps staged prefill. 12 GB cards get 64K without staging (agents need the window
+  more than the faster prefill); 8 GB cards get 16K without staging, and only when the card drives no display.
+- **RAM:** the RAM cache holds every expert that isn't in VRAM, as far as RAM allows; the rest is read from the NVMe
+  drive when picked. Experts are picked very unevenly, so the share of *picks* served from memory is far higher
+  than the share of experts held (a 16 GB card's 2,400 cached experts served 66% of picks). On 16-32 GB machines the
+  manager's RAM thresholds scale down with the RAM.
+- **Windows** keeps about 8 GB more for itself and WSL: 16 GB of RAM is too little there, and 32-64 GB machines get
+  smaller RAM caches (`python3 sizing.py presets --platform windows-wsl`).
+
+**Measured.** An RTX 5090 (WSL2, 64 GB RAM) capped to each card's VRAM
+([method and full results](research/vram-scaling/REPORT.md)). The caps emulate VRAM capacity only: real smaller
+cards also have less bandwidth and slower PCIe, so expect less. Not measured yet: more RAM with less VRAM (128 GB
+with a 24 GB card or smaller), less RAM (16-32 GB), and real 8-24 GB cards. New results go into `sizing.MEASURED`;
+`python3 sizing.py presets --write README.md` regenerates both tables.
+
+<!-- measured:begin -->
+| Card (VRAM) | Quant | Context | RAM cache | Prefill | Decode | Measured on |
+|---|---|---|---|---|---|---|
+| **32 GB** | 3.05 | 256K | 25 GiB | 5,754 tok/s | 64.0 tok/s | RTX 5090, capped (64 GB RAM) |
+| **24 GB** | 3.05 | 256K | 32 GiB | 5,896 tok/s | 51.5 tok/s | RTX 5090, capped (64 GB RAM) |
+| **16 GB** | 3.05 | 256K | 38 GiB | 4,338 tok/s | 37.8 tok/s | RTX 5090, capped (64 GB RAM) |
+| **12 GB** | 3.05 | 64K | 38 GiB | 1,816 tok/s | 33.2 tok/s | RTX 5090, capped (64 GB RAM) |
+| **12 GB** | 3.05 | 128K, no staging | 38 GiB | 1,564 tok/s | 29.9 tok/s | RTX 5090, capped (64 GB RAM) |
+| **8 GB, no display** | 3.05 | 16K, no staging | 38 GiB | 1,166 tok/s | 20.2 tok/s | RTX 5090, capped (64 GB RAM) |
+| **32 GB** | 4.05 | 256K | 38 GiB | 5,293 tok/s | 56.1 tok/s | RTX 5090, capped (64 GB RAM) |
+| **24 GB** | 4.05 | 256K | 38 GiB | 5,006 tok/s | 42.6 tok/s | RTX 5090, capped (64 GB RAM) |
+| **16 GB** | 4.05 | 256K | 38 GiB | 1,384 tok/s | 30.3 tok/s | RTX 5090, capped (64 GB RAM) |
+| **12 GB** | 4.05 | 32K, no staging | 38 GiB | 431 tok/s | 26.6 tok/s | RTX 5090, capped (64 GB RAM) |
+<!-- measured:end -->
+
 ---
 
 ## Measured Performance
@@ -63,17 +118,8 @@ Benchmarked using `turboderp/Qwen3.8-Flash-Next-exl3` (`3.05bpw_h5_ng5`) with 4-
 | **RTX 3080 Laptop (16GB)** | 100k (16 GB cache) | 23.9 GB | 15.5 GB | 693 tok/s | 20.9 tok/s |
 | **RTX 4090** | 17 tokens (4 GB cache, unquantized KV) | 8.55 GB | 14.90 GB | — | 16.0 tok/s (code) |
 
-**This fork, RTX 5090 (WSL2), capped to smaller cards** ([full table and method](research/vram-scaling/REPORT.md)).
-The caps emulate VRAM capacity only: real smaller cards also have less bandwidth and slower PCIe, so expect less.
-
-| Card class (VRAM for the model) | Quant | Context | Prefill | Decode |
-| :--- | :--- | :--- | :--- | :--- |
-| **32 GB** (30 GB) | 3.05 / 4.05 | 262k | 5,754 / 5,293 tok/s | 64.0 / 56.1 tok/s |
-| **24 GB** (22 GB) | 3.05 / 4.05 | 262k | 5,896 / 5,006 tok/s | 51.5 / 42.6 tok/s |
-| **16 GB** (14.5 GB) | 3.05 / 4.05 | 262k | 4,338 / 1,384 tok/s | 37.8 / 30.3 tok/s |
-| **12 GB** (10.5 GB) | 3.05 | 64k / 128k | 1,816 / 1,564 tok/s | 33.2 / 29.9 tok/s |
-| **12 GB** (10.5 GB) | 4.05 | 32k | 431 tok/s | 26.6 tok/s |
-| **8 GB, not driving a display** (8 GB) | 3.05 | 16k | 1,166 tok/s | 20.2 tok/s |
+This fork's measurements on 8-32 GB cards, and the preset for each card and amount of RAM, are under
+[Presets](#presets-a-baseline-from-vram-and-ram).
 
 ---
 
@@ -95,6 +141,8 @@ Qwen3.8-Flash-Next activates only 10 of its 512 experts per layer per token (~2%
 * Linux (x86_64), or Windows 10/11 with the engine in WSL2 (the [manager](docs/manager.md) sets that up)
 * NVIDIA GPU, Turing or newer, with at least 12 GB VRAM (16 GB+ recommended). An 8 GB card works at 16k context if
   it doesn't also drive a display ([measurements](research/vram-scaling/REPORT.md))
+* RAM: 16 GB on Linux and 32 GB on Windows at minimum; 64 GB keeps the whole model in VRAM + RAM
+  ([presets](#presets-a-baseline-from-vram-and-ram))
 * Fast NVMe SSD (PCIe 3.0 or 4.0, ~3+ GB/s read throughput)
 * CUDA 12.4+ (12.8 for RTX 50 cards) and Python 3.10–3.12
 
@@ -185,6 +233,9 @@ If I get some free time—or someone wants to contribute or put an agent on it:
     records).
 - ~~**Higher VRAM:** Benchmark 24 GB and 32 GB GPUs.~~ **Done:** decode 51.5 / 64 tok/s (3.05) at 24 / 32 GB; prefill
   stays ~5,800 tok/s ([report](research/vram-scaling/REPORT.md)).
+- **Presets, next measurements:** more RAM with less VRAM (128 GB with a 24 GB card and smaller), 16-32 GB of RAM,
+  and real 8-24 GB cards. `bench/vram_matrix.py` runs them (`:ram=N` sets the RAM cache) and
+  `bench/vram_table.py --sizing` prints the rows for `sizing.MEASURED`.
 - **Prefill on 12-16 GB cards:** a single staging buffer, to keep big chunks where two don't fit.
 - **Two GPUs:** not supported by the offload layer yet. A layer split looks like the best fit
   ([research notes](docs/research/multi-gpu.md)).

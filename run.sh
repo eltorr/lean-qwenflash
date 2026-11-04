@@ -34,11 +34,14 @@ esac
 # The offload engine is single-GPU (docs/research/multi-gpu.md): with several cards visible, pin it to one.
 GPU="${QWEN_GPU:-0}"
 if [ -z "${CUDA_VISIBLE_DEVICES:-}" ] && [ "$(nvidia-smi -L | wc -l)" -gt 1 ]; then export CUDA_VISIBLE_DEVICES="$GPU"; fi
-read -r VRAM_TOTAL_MIB VRAM_USED_MIB CC < <(nvidia-smi -i "$GPU" --query-gpu=memory.total,memory.used,compute_cap \
-  --format=csv,noheader,nounits | tr -d ' ' | tr ',' ' ')
+read -r VRAM_TOTAL_MIB VRAM_USED_MIB CC DISP < <(nvidia-smi -i "$GPU" \
+  --query-gpu=memory.total,memory.used,compute_cap,display_active --format=csv,noheader,nounits | tr -d ' ' | tr ',' ' ')
 VRAM_TOTAL=$(calc "$VRAM_TOTAL_MIB * 1048576"); VRAM_USED=$(calc "$VRAM_USED_MIB * 1048576")
-# keep ~10% of the card (1.2-3.2 GB) free for the desktop and other apps
-HEADROOM=$(calc "($VRAM_TOTAL * 0.10 < 1.2 * $GB) ? 1.2 * $GB : (($VRAM_TOTAL * 0.10 > 3.2 * $GB) ? 3.2 * $GB : $VRAM_TOTAL * 0.10)")
+# keep ~10% of the card (1.2-3.2 GB) free for the desktop and other apps; 0.6 GB minimum when no display is attached
+# (sizing.headroom_bytes)
+# (nvidia-smi says Disabled under WSL even for the desktop's card)
+MIN_HEADROOM=1.2; [ "${DISP:-}" = Disabled ] && [ ! -d /usr/lib/wsl ] && MIN_HEADROOM=0.6
+HEADROOM=$(calc "($VRAM_TOTAL * 0.10 < $MIN_HEADROOM * $GB) ? $MIN_HEADROOM * $GB : (($VRAM_TOTAL * 0.10 > 3.2 * $GB) ? 3.2 * $GB : $VRAM_TOTAL * 0.10)")
 : "${QWEN_VRAM_LIMIT_BYTES:=$(calc "$VRAM_TOTAL - $HEADROOM")}"
 : "${QWEN_TORCH_LIMIT_BYTES:=$(calc "$QWEN_VRAM_LIMIT_BYTES - $VRAM_USED + 0.5 * $GB")}"
 : "${QWEN_VRAM_GUARD_BYTES:=$VRAM_TOTAL}"

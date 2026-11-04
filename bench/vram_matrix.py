@@ -5,8 +5,10 @@ Runs on the engine side (native Linux or inside WSL) with the engine's venv pyth
   .venv/bin/python bench/vram_matrix.py --runs 3.05:30:262144,3.05:14.5:262144,3.05:10.5:65536 \
       --out research/vram-scaling/results
 
-Each run is QUANT:USABLE_GB:CONTEXT[:nostage]. USABLE_GB is the VRAM the model may use, as on a smaller card after
-the desktop's share. The engine is capped the way the upstream 16 GB numbers were measured: its VRAM limit
+Each run is QUANT:USABLE_GB:CONTEXT[:nostage][:ram=GIB]. USABLE_GB is the VRAM the model may use, as on a smaller
+card after the desktop's share; "card" runs uncapped, as the manager would on this card (use that on real 8-24 GB
+cards). ram=GIB sets the RAM cache (default: every expert outside VRAM, up to --ram-max-gib), to measure presets with
+less or more RAM; on a 128 GB machine, e.g. 4.05:22:262144:ram=48 and 4.05:22:262144:ram=16. The engine is capped the way the upstream 16 GB numbers were measured: its VRAM limit
 (QWEN_VRAM_LIMIT_BYTES) sizes the expert cache to what is in use now + USABLE_GB, and its guard
 (QWEN_VRAM_GUARD_BYTES) stops the server if device usage ever goes past that, which is what running out of memory
 would do on the real card. run.sh asks sizing.py for the chunk/staging plan of that budget.
@@ -127,27 +129,52 @@ def engine_stats(port):
             "picks_nvme_pct": round(100 * h.get("nvme", 0) / picks, 1)}
 
 
-def one(quant, usable_gb, context, port, out_dir, nostage=False):
-    label = f"{quant}-{usable_gb:g}gb-{context // 1024}k" + ("-nostage" if nostage else "")
+def host_facts():
+    q = sh("nvidia-smi", "-i", "0", "--query-gpu=name,pcie.link.gen.max,pcie.link.width.max,display_active",
+           "--format=csv,noheader").stdout.strip().split(", ")
+    mem = dict(line.split(":", 1) for line in Path("/proc/meminfo").read_text().splitlines() if ":" in line)
+    wsl = "microsoft" in Path("/proc/version").read_text().lower()
+    return {"gpu": q[0] if q else None, "pcie": f"{q[1]}.0 x{q[2]}" if len(q) > 2 else None,
+            "display": None if wsl or len(q) < 4 else q[3] == "Enabled",
+            "ram_total_gb": round(int(mem["MemTotal"].split()[0]) * 1024 / GB, 1),
+            "platform": "windows-wsl" if wsl else "linux"}
+
+
+def ram_max_default():
+    """What run.sh would give: available RAM minus 14 GB for the host and the server's own use."""
+    mem = dict(line.split(":", 1) for line in Path("/proc/meminfo").read_text().splitlines() if ":" in line)
+    return max(4, int((int(mem["MemAvailable"].split()[0]) * 1024 - 14 * GB) // GIB))
+
+
+def one(quant, usable_gb, context, port, out_dir, nostage=False, ram=None, ram_max=38, facts=None):
+    card = usable_gb is None
+    label = (f"{quant}-{'card' if card else f'{usable_gb:g}gb'}-{context // 1024}k" + ("-nostage" if nostage else "")
+             + (f"-ram{ram}" if ram else ""))
     print(f"=== {label}", flush=True)
     backend("stop", "20")
     time.sleep(3)
     used0, total = gpu_used_total()
+    if card:
+        # what the manager gives on this card: total minus headroom, minus what is already in use
+        usable_gb = round((total - sizing.headroom_bytes(total, (facts or {}).get("display") is not False) - used0)
+                          / GB, 2)
     usable = usable_gb * GB
     plan = sizing.plan(quant, usable, context)
     rec = {"label": label, "quant": quant, "usable_gb": usable_gb, "context": context, "nostage": nostage,
-           "device_used_before_gb": round(used0 / GB, 2), "method": "engine cap (limit + guard)",
+           "device_used_before_gb": round(used0 / GB, 2), "card_total_gb": round(total / GB, 2),
+           "method": "uncapped card" if card else "engine cap (limit + guard)", "host": facts or {},
            "plan": {k: v for k, v in plan.items() if isinstance(v, (int, float, str, bool)) or v is None}}
     if not plan["ok"] and not nostage:
         rec["error"] = plan.get("reason")
         print("  does not fit:", rec["error"], flush=True)
     else:
         need_all = plan["ram_for_all_experts"] if plan["ok"] else sizing.expert_bytes(quant)
-        ram_gib = int(min(need_all / GIB + 1, 38))
-        env = [f"QUANT={quant}", f"CONTEXT={context}", f"PORT={port}", "HOST=127.0.0.1", f"RAM_GB={ram_gib}",
-               f"QWEN_VRAM_LIMIT_BYTES={int(used0 + usable)}",
-               # a little slack for the desktop changing its own use during the run
-               f"QWEN_VRAM_GUARD_BYTES={int(used0 + usable + 0.25 * GB)}"]
+        ram_gib = ram or int(min(need_all / GIB + 1, ram_max))
+        env = [f"QUANT={quant}", f"CONTEXT={context}", f"PORT={port}", "HOST=127.0.0.1", f"RAM_GB={ram_gib}"]
+        if not card:
+            env += [f"QWEN_VRAM_LIMIT_BYTES={int(used0 + usable)}",
+                    # a little slack for the desktop changing its own use during the run
+                    f"QWEN_VRAM_GUARD_BYTES={int(used0 + usable + 0.25 * GB)}"]
         if nostage:
             r_gb = sizing.nostage_reserve(quant, 1536) / GIB
             env += ["QWEN_CHUNK=1536", "QWEN38_EC_STAGE_GB=0", "QWEN38_EC_ELASTIC_GB=0", f"QWEN38_EC_RESERVE_GB={r_gb:.2f}"]
@@ -195,13 +222,19 @@ def one(quant, usable_gb, context, port, out_dir, nostage=False):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--runs", required=True, help="comma-separated QUANT:USABLE_GB:CONTEXT[:nostage]")
+    ap.add_argument("--runs", required=True, help="comma-separated QUANT:USABLE_GB|card:CONTEXT[:nostage][:ram=GIB]")
     ap.add_argument("--out", default=str(REPO / "research" / "vram-scaling" / "results"))
     ap.add_argument("--port", type=int, default=30001)
+    ap.add_argument("--ram-max-gib", type=int, help="largest default RAM cache (default: what RAM can spare)")
     a = ap.parse_args()
+    facts = host_facts()
+    ram_max = a.ram_max_gib or ram_max_default()
+    print(f"host: {facts}; default RAM cache up to {ram_max} GiB", flush=True)
     for spec in a.runs.split(","):
         q, gb, ctx, *flags = spec.split(":")
-        one(q, float(gb), int(ctx), a.port, a.out, nostage="nostage" in flags)
+        ram = next((int(f[4:]) for f in flags if f.startswith("ram=")), None)
+        one(q, None if gb == "card" else float(gb), int(ctx), a.port, a.out, nostage="nostage" in flags, ram=ram,
+            ram_max=ram_max, facts=facts)
     print("MATRIX_DONE", flush=True)
 
 

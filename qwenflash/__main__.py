@@ -14,6 +14,7 @@ import os
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 from . import config
 from .config import GB, IS_WINDOWS, REPO
@@ -151,19 +152,64 @@ def cmd_setup(cfg, a):
     return asyncio.run(go())
 
 
+def first_run_baseline(cfg):
+    """A new install starts from the preset for this machine (sizing.baseline: card + RAM + platform)."""
+    import psutil
+    from .hardware import machine_baseline
+    from .host import make_host
+    try:
+        h = make_host(cfg)
+        if not h.gpu:
+            return None
+        b = machine_baseline(h.gpu.info(), psutil.virtual_memory().total, h.kind)
+    except Exception as e:  # noqa: BLE001 - no GPU access yet: keep the defaults
+        config.log.info("first run: no baseline (%s)", e)
+        return None
+    if not b["ok"]:
+        config.log.info("first run: %s", b["reason"])
+        return b
+    settings = dict(b["settings"])
+    if h.kind == "linux":
+        # an engine checkout that already holds the other model: keep it rather than ask for a second download
+        sys.path.insert(0, str(REPO))
+        import sizing
+
+        def present(q):
+            root = Path(cfg["repo_dir"] or h.engine_dir)
+            return (root / sizing.QUANTS[q]["model_dir"]).is_dir() and (root / sizing.QUANTS[q]["store"]).is_file()
+        other = "3.05" if settings["quant"] == "4.05" else "4.05"
+        if not present(settings["quant"]) and present(other):
+            settings.pop("quant")
+            settings.pop("context")
+    cfg.update(settings)
+    config.log.info("first run: baseline for this machine: %s", settings)
+    return b
+
+
 def cmd_plan(cfg, a):
     sys.path.insert(0, str(REPO))
+    import psutil
     import sizing
     from .host import make_host
-    from .hardware import gpu_budget
+    from .hardware import gpu_budget, has_display, machine_baseline
     h = make_host(cfg)
+    if h.gpu and not a.budget_gb:
+        info = h.gpu.info()
+        ram = psutil.virtual_memory().total
+        print(f"this machine: {info['name']} ({info['vram_total'] / 2**30:.0f} GB, "
+              f"{'display' if has_display(info) else 'no display'}), "
+              f"{ram / 2**30:.0f} GB RAM, {sizing.PLATFORMS.get(h.kind, h.kind)}")
+        print("baseline:     " + sizing.describe(machine_baseline(info, ram, h.kind)).replace("\n  ", "\n              "))
+        print(f"your config:  {cfg['quant']} bpw, {cfg['context'] // 1024}K context")
+        print()
     budget = a.budget_gb * GB if a.budget_gb else (gpu_budget(h.gpu.info(), cfg) if h.gpu else 0)
     for q in sizing.QUANTS:
         p = sizing.plan(q, budget, a.context or cfg["context"])
         state = "ok" if p["ok"] else "does not fit"
         print(f"{q} bpw, {budget / GB:.1f} GB, {p['context'] // 1024}K: {state}; chunk {p['chunk']}, "
               f"{p['slots']} cached experts, {p['ram_for_all_experts'] / 2**30:.0f} GiB RAM holds the rest; "
-              f"max context {sizing.max_context(q, budget) // 1024}K" + ("" if p["staging"] else " (staging-free)"))
+              f"max context {sizing.max_context(q, budget, staging=False) // 1024}K"
+              + ("" if p["staging"] else " (staging-free)"))
     return 0
 
 
@@ -188,6 +234,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
     cfg = config.load_config()
     if not config.CONFIG_PATH.exists():
+        first_run_baseline(cfg)
         config.save_config(cfg)
     handler = {None: cmd_serve, "serve": cmd_serve, "open": cmd_open, "status": cmd_status, "detect": cmd_detect,
                "setup": cmd_setup, "plan": cmd_plan}[a.cmd]

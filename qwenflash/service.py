@@ -34,7 +34,7 @@ import sizing  # noqa: E402
 
 # RAM the model uses beyond its expert RAM tier (process, torch, page cache; under WSL also the VM's own share).
 # A first guess per platform; after each start the manager measures the real figure and uses that from then on.
-RAM_OVERHEAD = {"linux": 6.5 * GB, "windows-wsl": 9.0 * GB}
+RAM_OVERHEAD = sizing.RAM_OVERHEAD
 RAM_GRACE_S = 90                 # after a start, page cache from loading takes a while to be handed back
 UI_FILE = REPO / "qwenflash" / "ui" / "index.html"
 OOM_VRAM = re.compile(r"out of memory|OutOfMemoryError|VRAM LIMIT EXCEEDED|Insufficient VRAM|cudaErrorMemoryAllocation",
@@ -85,6 +85,7 @@ class Service:
         self.cfg = cfg
         self.observe = observe
         self.host = make_host(cfg)
+        self.gpu_display = self._gpu_display()
         self.mon = Monitor(self)
         self.be = Backend()
         self.setup = Setup(self)
@@ -111,6 +112,13 @@ class Service:
         self.quit = None
         self.ollama_list, self.ollama_models, self.ollama_up, self.ollama_requests = [], set(), False, 0
         self.front_server, self._front_warned = None, False
+
+    def _gpu_display(self):
+        from .hardware import has_display
+        try:
+            return has_display(self.host.gpu.info()) if self.host.gpu else True
+        except OSError:
+            return True
 
     # ================================================================ bookkeeping
     def event(self, kind, msg):
@@ -145,10 +153,11 @@ class Service:
         return max(floor, min(16 * GB, 0.55 * m["vram_total"]))
 
     def headroom(self, m):
-        """VRAM left free in full mode: the setting, or ~10% of the card (1.2-3.2 GB) when 0 (automatic)."""
+        """VRAM left free in full mode: the setting, or ~10% of the card (1.2-3.2 GB; 0.6 GB minimum on a card that
+        drives no display) when 0 (automatic)."""
         if self.cfg["full_vram_headroom_gb"] > 0:
             return self.cfg["full_vram_headroom_gb"] * GB
-        return min(3.2 * GB, max(1.2 * GB, 0.1 * m["vram_total"]))
+        return sizing.headroom_bytes(m["vram_total"], self.gpu_display)
 
     def full_budget(self, m):
         b = m["vram_total"] - self.ext_vram(m) - self.headroom(m)
@@ -177,15 +186,10 @@ class Service:
         right now (never below lean's). VRAM is what makes full fast; a smaller RAM tier only sends rarer experts
         to NVMe."""
         cfg = self.cfg
-        need = math.ceil(plan["ram_for_all_experts"] / GIB)
-        if cfg["max_ram_cache_gib"] > 0:
-            need = min(need, cfg["max_ram_cache_gib"])
-        cap = self.learned.get(self.learned_key(), {}).get("ram_cap")
-        if cap:
-            need = min(need, cap)
-        # keep free RAM after the start clearly above the scale-back threshold, or full -> lean -> full would loop
-        spare = self.ram_spare(m, max(cfg["ram_reserve_gb"], cfg["ram_lean_gb"] + 3)) - self.ram_overhead()
-        return int(max(cfg["lean_ram_gb"], min(need, spare // GIB)))
+        caps = [c for c in (cfg["max_ram_cache_gib"], self.learned.get(self.learned_key(), {}).get("ram_cap")) if c]
+        # free RAM after the start stays clearly above the scale-back threshold, or full -> lean -> full would loop
+        return sizing.ram_cache_gib(plan["ram_for_all_experts"], m["ram_avail"] + self.own_ram_estimate(), cfg,
+                                    self.ram_overhead(), min(caps) if caps else None)
 
     def ram_need_lean(self):
         return self.cfg["lean_ram_gb"] * GIB + self.ram_overhead()

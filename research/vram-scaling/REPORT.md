@@ -97,6 +97,11 @@ That is why the manager watches other apps' VRAM and steps the model down instea
 
 ## Next measurements
 
+- **RAM, for the presets:** every row here had a 25-38 GiB RAM cache (a 64 GB machine). The README presets for 16-32 GB
+  of RAM (4-15 GiB caches) and for 128 GB with a 24 GB card or smaller are computed, not measured.
+  `bench/vram_matrix.py` takes `:ram=GIB` per run (e.g. `4.05:22:262144:ram=48`, `3.05:14.5:262144:ram=4`) and
+  `card` instead of a VRAM figure to run a real card uncapped; `bench/vram_table.py --sizing` prints the rows for
+  `sizing.MEASURED`.
 - **Real 12, 16 and 24 GB cards:** what PCIe 4.0 and lower bandwidth cost, compared with these capped numbers.
 - **8 GB with a display:** after shrinking the fixed footprint, profile the ~2.5 GB of VRAM no component accounts for
   (`torch.cuda.memory_snapshot()` after load).

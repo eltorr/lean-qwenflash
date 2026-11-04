@@ -1,7 +1,10 @@
 """The sizing model must reproduce what was measured and refuse plans that cannot work."""
+import sys
 import unittest
+from pathlib import Path
 
-import sizing
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import sizing  # noqa: E402
 
 GB = 1e9
 GIB = 1024 ** 3
@@ -44,6 +47,38 @@ class SizingTests(unittest.TestCase):
         self.assertGreaterEqual(p["reserve"], 0.7 * GB)
         # driving a desktop as well (~7 GB left), long prompts overran it: refuse
         self.assertFalse(sizing.plan("3.05", 7 * GB, 16384)["ok"])
+
+    def test_baseline_presets(self):
+        def b(vram, ram, display=True, platform="linux"):
+            return sizing.baseline(sizing.card_bytes(vram), sizing.ram_bytes(ram), display, platform)
+        # this PC: RTX 5090, 64 GB, Windows: what it runs today
+        p = b(32, 64, platform="windows-wsl")
+        self.assertEqual((p["quant"], p["context"]), ("4.05", 262144))
+        self.assertTrue(p["measured"])
+        # 24 GB: 4.05 needs the RAM to hold the rest of its experts; 3.05 below that
+        self.assertEqual(b(24, 128)["quant"], "4.05")
+        self.assertEqual(b(24, 32)["quant"], "3.05")
+        self.assertEqual(b(16, 128)["quant"], "3.05")         # 4.05 prefill drops to 4K chunks on 16 GB
+        # small cards: 64K staging-free on 12 GB, 16K staging-free on 8 GB only without a display
+        p = b(12, 64)
+        self.assertEqual((p["context"], p["staging"]), (65536, False))
+        p = b(8, 64, display=False)
+        self.assertTrue(p["ok"])
+        self.assertEqual((p["context"], p["staging"]), (16384, False))
+        self.assertFalse(b(8, 64)["ok"])
+        # RAM: 16 GB works on Linux with smaller thresholds, not on Windows
+        p = b(16, 16)
+        self.assertTrue(p["ok"])
+        self.assertLess(p["settings"]["ram_reserve_gb"], 6)
+        self.assertFalse(b(16, 16, platform="windows-wsl")["ok"])
+        # a measurement only labels a preset with a similar RAM cache
+        self.assertFalse(b(16, 32)["measured"])
+
+    def test_readme_tables_are_generated(self):
+        readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
+        for name, body in (("presets", sizing.presets_table()), ("measured", sizing.measured_table())):
+            self.assertIn(f"<!-- {name}:begin -->\n{body}\n<!-- {name}:end -->", readme,
+                          f"README {name} table is stale: python3 sizing.py presets --write README.md")
 
     def test_budgeted_runs_pin_the_cache(self):
         p = sizing.plan("3.05", 16 * GB, 262144)

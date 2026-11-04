@@ -5,6 +5,7 @@ missing pieces are reported as such.
 """
 import configparser
 import ctypes
+import math
 import os
 import re
 import subprocess
@@ -199,14 +200,61 @@ def detect(host, cfg, with_engine=True):
 # ---------------------------------------------------------------------------------------------------------------
 def wsl_memory_gb(total_gb):
     """Give WSL most of the RAM (the expert cache lives there) but keep Windows responsive."""
-    return int(max(8, total_gb - max(8, total_gb * 0.125)))
+    return int(sizing.wsl_memory_bytes(total_gb * GB) / GB)
+
+
+def display_reliable():
+    """NVML's display_active reads 'Disabled' under Windows (WDDM) and inside WSL even on the card that drives the
+    desktop; only native Linux reports it truthfully."""
+    if IS_WINDOWS:
+        return False
+    try:
+        return "microsoft" not in Path("/proc/version").read_text().lower()
+    except OSError:
+        return True
+
+
+def has_display(gpu):
+    """Whether the card drives a display; when that can't be known, assume it does (the safe side for VRAM)."""
+    return gpu.get("display_active") is not False or not display_reliable()
 
 
 def gpu_budget(gpu, cfg):
-    """VRAM the model could use with nothing else running: total minus headroom and the desktop's share."""
+    """VRAM the model could use with nothing else running: total minus the desktop's share and headroom."""
     total = gpu["vram_total"]
-    desktop = 1.5 * GB if gpu.get("display_active") else 0.4 * GB
-    return max(0.0, total - desktop - min(cfg["full_vram_headroom_gb"] * GB, 0.1 * total + 0.4 * GB))
+    if cfg["full_vram_headroom_gb"] > 0:
+        desktop = sizing.DESKTOP_VRAM if has_display(gpu) else 0.1 * GB
+        return max(0.0, total - desktop - cfg["full_vram_headroom_gb"] * GB)
+    return max(0.0, sizing.card_budget(total, has_display(gpu)))
+
+
+def machine_baseline(gpu, ram_total, kind):
+    """sizing.baseline() for this card, RAM and platform (README "Presets")."""
+    return sizing.baseline(gpu["vram_total"], ram_total, has_display(gpu), kind)
+
+
+def baseline_item(b, cfg, have=None):
+    """The baseline as a recommendation: (level, title, detail, settings to apply)."""
+    if not b["ok"]:
+        return "error", "This machine can't run the model as it is", b["reason"], None
+    mem = ("every expert fits in VRAM + RAM" if b["in_memory"] >= 0.97 else
+           f"{b['in_memory']:.0%} of the experts fit in VRAM + RAM; the rest is read from the NVMe drive when picked")
+    detail = f"{b['slots']:,} experts cached in VRAM; {mem}."
+    if not b["staging"]:
+        detail += " Prompts are processed staging-free (small card)."
+    for m in b["measured"][:1]:
+        detail += (f" Measured: {m['decode']} tok/s generation, {m['prefill']:,} tok/s prompt processing "
+                   f"({m['gpu']}).")
+    if b.get("experimental"):
+        detail += " Below 12 GB this is experimental."
+    settings = {k: v for k, v in b["settings"].items() if cfg.get(k) != v}
+    if have is not None and not have.get(b["quant"]) and have.get(cfg["quant"]) and "quant" in settings:
+        detail += (f" The {b['quant']} bpw model isn't downloaded yet: run its setup step, then apply this to switch.")
+        settings = {k: v for k, v in settings.items() if k not in ("quant", "context")}
+    title = (f"{b['quant']} bpw, {b['context'] // 1024}K context, {b['ram_cache_gib']} GiB RAM cache")
+    if not settings:
+        return "ok", "Baseline for this machine (your settings): " + title, detail, None
+    return "info", "Baseline for this machine: " + title, detail, settings
 
 
 def recommend(hw, cfg):
@@ -232,21 +280,28 @@ def recommend(hw, cfg):
                                                         "only been run on Ampere and newer.")
     budget = gpu_budget(g, cfg)
     quant = cfg["quant"]
-    ctx_best = {q: sizing.max_context(q, budget) for q in sizing.QUANTS}
-    if ctx_best["3.05"] == 0:
-        add("error", f"{vram / GIB:.0f} GB of VRAM is not enough",
-            f"With the desktop's share, about {budget / GB:.1f} GB would be left; the model needs at least "
-            f"{sizing.min_budget('3.05', 16384) / GB:.1f} GB at 16K context. 8 GB cards are a research item "
-            f"(README To-Do).")
+    kind = hw["host"].get("kind", "linux")
+    ram_total = hw["ram"]["total_gb"] * GB
+    e = hw.get("engine") or {}
+    have = {"3.05": e.get("m305") == "1", "4.05": e.get("m405") == "1"} if e.get("driver") else None
+    base = machine_baseline(g, ram_total, kind)
+    level, title, detail, settings = baseline_item(base, cfg, have)
+    add(level, title, detail, settings)
+    out[-1]["apply_label"] = "Apply baseline"
+    ctx_any = sizing.max_context(quant, budget, staging=False)
+    ctx_fast = sizing.max_context(quant, budget)
+    if sizing.max_context("3.05", budget, staging=False) == 0:
+        pass                                    # the baseline item says why
+    elif ctx_any == 0:
+        add("warn", f"{quant} bpw does not fit this GPU", "Use 3.05 bpw.", {"quant": "3.05"})
     else:
-        ctx = min(cfg["context"], ctx_best[quant] or ctx_best["3.05"])
         level = "ok" if vram >= 15e9 else "warn"
         tested = "" if vram >= 15e9 else " Below 16 GB is experimental: smaller prefill chunks and a smaller cache."
-        add(level, f"{g['name']} ({vram / GIB:.0f} GB): up to {ctx_best[quant] // 1024}K context at {quant} bpw",
-            f"About {budget / GB:.1f} GB for the model with nothing else on the GPU.{tested}",
-            {"context": ctx} if ctx != cfg["context"] else None)
-        if ctx_best["4.05"] == 0 and quant == "4.05":
-            add("warn", "4.05 bpw does not fit this GPU", "Use 3.05 bpw.", {"quant": "3.05"})
+        staged = (f" Prompt processing is staging-free (slower) above {ctx_fast // 1024}K."
+                  if ctx_fast < ctx_any else "")
+        add(level, f"{g['name']} ({vram / GIB:.0f} GB): up to {ctx_any // 1024}K context at {quant} bpw",
+            f"About {budget / GB:.1f} GB for the model with nothing else on the GPU.{staged}{tested}",
+            {"context": ctx_any} if cfg["context"] > ctx_any else None)
     if len(hw["gpus"]) > 1:
         add("info", f"{len(hw['gpus'])} GPUs found: the engine uses GPU 0 ({g['name']})",
             "Multi-GPU is a research item; see docs/research/multi-gpu.md.")
@@ -261,19 +316,23 @@ def recommend(hw, cfg):
         add("info", "This GPU also drives the display", "About 1-2 GB of VRAM stays with the desktop.")
 
     # RAM: VRAM cache + RAM tier should hold every expert, or the rest is read from NVMe each time it's needed
-    plan = sizing.plan(quant, budget, cfg["context"])
-    need_gib = plan["ram_for_all_experts"] / GIB
     host_ram = hw["ram"]["total_gb"]
-    usable = (hw.get("wslconfig", {}).get("memory_gb") or host_ram) if IS_WINDOWS else host_ram
-    spare = usable - cfg["ram_reserve_gb"] - 6.5
-    if spare >= need_gib:
-        add("ok", f"RAM: every expert fits in VRAM + RAM ({need_gib:.0f} GiB RAM cache)")
-    elif spare >= cfg["lean_ram_gb"]:
-        add("info", f"RAM: {spare:.0f} of {need_gib:.0f} GiB for the expert cache",
+    plan = sizing.plan(quant, budget, min(cfg["context"], ctx_any or cfg["context"]))
+    need_gib = math.ceil(plan["ram_for_all_experts"] / GIB)
+    over = sizing.RAM_OVERHEAD.get(kind, 8 * GB)
+    cache = sizing.ram_cache_gib(plan["ram_for_all_experts"], ram_total - sizing.OS_IDLE.get(kind, 4 * GB), cfg, over)
+    if IS_WINDOWS:
+        wsl_gb = hw.get("wslconfig", {}).get("memory_gb") or host_ram / 2
+        cache = min(cache, int((wsl_gb * GB - over) // GIB))
+    if cache >= need_gib:
+        add("ok", f"RAM: every expert fits in VRAM + RAM ({need_gib} GiB RAM cache)")
+    elif cache > cfg["lean_ram_gb"]:
+        add("info", f"RAM: about {cache} of {need_gib} GiB for the expert cache",
             "The rest is read from the NVMe drive when needed. More RAM, or 3.05 bpw, keeps more of the model in "
             "memory.")
     else:
-        add("warn", "Little RAM for the expert cache", f"About {max(0, spare):.0f} GiB can be spared.")
+        add("warn", "Little RAM for the expert cache", f"About {cache} GiB of the {need_gib} GiB the model could use "
+                                                       f"can be spared.")
     if IS_WINDOWS:
         w, wc = hw["wsl"], hw["wslconfig"]
         if not w["installed"]:
@@ -290,7 +349,6 @@ def recommend(hw, cfg):
             add("info", f"WSL is limited to {have:.0f} GB", f"{want} GB would leave more for the expert cache.")
         if not hw["cpu"].get("virtualization_firmware") and not w["installed"]:
             add("warn", "Virtualization looks disabled in the firmware", "WSL 2 needs it (Intel VT-x / AMD SVM).")
-    e = hw.get("engine") or {}
     if e.get("fs") and e["fs"] not in ("ext2/ext3", "xfs", "btrfs"):
         add("warn", f"Engine is on a '{e['fs']}' filesystem", "The expert store needs O_DIRECT reads (ext4 or xfs).")
     if e.get("disk_free_gb"):

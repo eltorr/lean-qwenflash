@@ -31,7 +31,7 @@ The same is available from a terminal, which helps on headless servers:
 qwenflash detect          platform, GPU (VRAM, architecture, PCIe link), CPU, RAM, WSL, engine, recommendations
 qwenflash setup           list the setup steps and their status
 qwenflash setup build     run one step here, with its output
-qwenflash plan            VRAM/RAM plan for this GPU at each quant (sizing.py)
+qwenflash plan            this machine's preset, and the VRAM/RAM plan at each quant (sizing.py)
 qwenflash status          what the running service is doing (add --json for everything)
 ```
 
@@ -58,6 +58,9 @@ WSL.
 - Only committed code is synced.
 
 **Recommendations:** the Setup tab compares the machine with what the model needs. For example:
+- the baseline for this card, RAM and platform: quant, context, RAM cache and the manager's RAM thresholds (the
+  [presets](../README.md#presets-a-baseline-from-vram-and-ram)). A new install starts from it; later it is offered
+  when your settings differ
 - the context window that fits this GPU
 - whether every expert fits in VRAM + RAM, or some will be read from NVMe
 - a PCIe link below Gen4 x16
@@ -70,7 +73,7 @@ Recommendations that suggest a setting have an *Apply* button.
 ## How it sizes and switches the model
 
 The model's VRAM use has two parts:
-- **A fixed part:** about 6.8 GB plus the KV cache, around 9.6-10 GB at 256K context.
+- **A fixed part:** about 6.2 GB (3.05 bpw) or 6.6 GB (4.05) plus the KV cache: 9.0-9.4 GB at 256K context.
 - **An expert cache** that takes whatever budget is left.
 
 [`sizing.py`](../sizing.py) turns a VRAM budget into a plan: cache size, prefill chunk (smaller on small cards),
@@ -78,7 +81,7 @@ and whether prefill staging fits. The manager and `run.sh` both use it.
 
 | Profile | VRAM budget | RAM cache | When |
 |---|---|---|---|
-| **Full** | everything free, minus headroom (~10% of the card, 1.2-3.2 GB) | enough for every expert that isn't in VRAM, shrunk to what the host can spare | nothing else needs the GPU |
+| **Full** | everything free, minus headroom (~10% of the card, 1.2-3.2 GB; 0.6 GB minimum on a card without a display) | enough for every expert that isn't in VRAM, shrunk to what the host can spare | nothing else needs the GPU |
 | **Lean** | about half the card (16 GB on a 32 GB card), never less than the context needs | `lean_ram_gb` (8 GiB) | other apps need VRAM or RAM (moderate pressure) |
 | **Paused** | 0 | 0 | a watched program runs, or VRAM/RAM is critically short (heavy pressure) |
 

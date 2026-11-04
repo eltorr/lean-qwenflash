@@ -541,7 +541,7 @@ async function loadHardware(refresh) {
   const LV = { ok: ["good", "✓"], info: ["accent", "i"], warn: ["warning", "!"], error: ["critical", "✕"] };
   $("recs").innerHTML = (hw.recommendations || []).map((r, i) => {
     const [c, ic] = LV[r.level] || LV.info;
-    const st = Object.keys(r.settings || {}).length ? `<button data-rec="${i}">Apply ${esc(Object.entries(r.settings).map(([k, v]) => k + " " + v).join(", "))}</button>` : "<span></span>";
+    const st = Object.keys(r.settings || {}).length ? `<button data-rec="${i}" title="${esc(Object.entries(r.settings).map(([k, v]) => k + " = " + v).join(", "))}">${esc(r.apply_label || "Apply " + Object.entries(r.settings).map(([k, v]) => k + " " + v).join(", "))}</button>` : "<span></span>";
     return `<li><span class="icon ${c}">${ic}</span><div><div>${esc(r.title)}</div><div class="d">${esc(r.detail || "")}</div></div>${st}</li>`;
   }).join("");
   document.querySelectorAll("[data-rec]").forEach((b) => b.onclick = async () => {
