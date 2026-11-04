@@ -1003,6 +1003,15 @@ class Service:
                     and self.best_tier(m, level="none") == "full"):
                 self.spawn(self.restart("full", "resources free again: re-saturating"))
                 return
+            # Grow a RAM cache that was sized while RAM was short (e.g. right after another big process exited).
+            if (tier == "full" and cfg["upgrade_when_idle"] and self.be.ram_gib and self.be.ram_measured
+                    and self.clear_since and now - self.clear_since >= cfg["recover_after_s"] and dwell_ok
+                    and self.in_flight == 0 and (idle or now - (self.be.ready_at or now) >= 120)):
+                want = self.full_ram_gib(m, self.plan_for("full", m))
+                if want - self.be.ram_gib >= 8:
+                    self.spawn(self.restart("full", f"more RAM is free: growing the RAM cache from "
+                                                    f"{self.be.ram_gib} to about {want} GiB"))
+                    return
             if (cfg["idle_unload_min"] > 0 and self.in_flight == 0
                     and now - (self.last_done or self.be.ready_at or now) >= cfg["idle_unload_min"] * 60):
                 self.spawn(self.stop(f"idle for {cfg['idle_unload_min']} min", "idle"))
