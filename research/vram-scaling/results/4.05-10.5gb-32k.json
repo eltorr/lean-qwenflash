@@ -11,76 +11,20 @@
   "context": 32768,
   "kv_bits": 4,
   "budget": 10500000000.0,
-  "fixed": 7532321536.0,
-  "reserve": 400000000.0,
-  "cache": 2202009600,
-  "slots": 896,
-  "staging": false,
-  "chunk": 1536,
+  "fixed": 6972321536.0,
+  "reserve": 900000000.0,
+  "cache": 2595225600,
+  "slots": 1056,
+  "staging": true,
+  "chunk": 2048,
   "ok": true,
   "experimental": true,
-  "ram_for_all_experts": 58195968000,
-  "min_budget": 10852503936.0
+  "ram_for_all_experts": 57802752000,
+  "min_budget": 10292503936.0
  },
  "ram_gib": 38,
- "startup_s": 56.4,
- "model_vram_gb": 9.85,
- "cold_first": {
-  "prompt_tokens": 74,
-  "completion_tokens": 600,
-  "ttft_s": 3.6183927059173584,
-  "decode_tps": 24.551420160878624,
-  "wall_s": 28.016281604766846
- },
- "decode_tps_median": 27.261929652818754,
- "decode_tps_min": 26.843328825718803,
- "short_ttft_median_s": 0.5612931251525879,
- "long": {
-  "prompt_tokens": 0,
-  "completion_tokens": 0,
-  "ttft_s": null,
-  "decode_tps": null,
-  "wall_s": 1.4791698455810547,
-  "prefill_tps": null,
-  "needle_found": false
- },
- "decode_runs": [
-  {
-   "prompt_tokens": 71,
-   "completion_tokens": 700,
-   "ttft_s": 0.472217321395874,
-   "decode_tps": 27.065702496871467,
-   "wall_s": 26.298420906066895
-  },
-  {
-   "prompt_tokens": 73,
-   "completion_tokens": 700,
-   "ttft_s": 0.6204183101654053,
-   "decode_tps": 26.843328825718803,
-   "wall_s": 26.660475730895996
-  },
-  {
-   "prompt_tokens": 69,
-   "completion_tokens": 700,
-   "ttft_s": 0.6052579879760742,
-   "decode_tps": 28.41146983512284,
-   "wall_s": 25.208106756210327
-  },
-  {
-   "prompt_tokens": 76,
-   "completion_tokens": 700,
-   "ttft_s": 0.5612931251525879,
-   "decode_tps": 27.77160299612008,
-   "wall_s": 25.73100185394287
-  },
-  {
-   "prompt_tokens": 67,
-   "completion_tokens": 700,
-   "ttft_s": 0.5321145057678223,
-   "decode_tps": 27.261929652818754,
-   "wall_s": 26.172404527664185
-  }
- ],
+ "startup_s": 59.1,
+ "model_vram_gb": 9.32,
  "error": "workload failed: <urlopen error [Errno 111] Connection refused>",
- "log_tail": "[   153s] QWEN_PREFILL {\"prompt_tokens\": 70, \"cached_tokens\": 0, \"first_stream_seconds\": 0.603405540001404, \"recurrent_checkpoints\": 0, \"recurrent_cache_bytes\": 0}\n[   177s] INFO:     127.0.0.1:56146 - \"POST /v1/chat/completions HTTP/1.1\" 200 OK\n[   178s] QWEN_PREFILL {\"prompt_tokens\": 77, \"cached_tokens\": 0, \"first_stream_seconds\": 0.5595856250001816, \"recurrent_checkpoints\": 0, \"recurrent_cache_bytes\": 0}\n[   203s] INFO:     127.0.0.1:51466 - \"POST /v1/chat/completions HTTP/1.1\" 200 OK\n[   203s] QWEN_PREFILL {\"prompt_tokens\": 68, \"cached_tokens\": 0, \"first_stream_seconds\": 0.5302063429990085, \"recurrent_checkpoints\": 0, \"recurrent_cache_bytes\": 0}\n[   229s] INFO:     127.0.0.1:36386 - \"POST /v1/chat/completions HTTP/1.1\" 200 OK\n[   229s] VRAM LIMIT EXCEEDED: 11718963200 > 11694766976\n[   229s] TORCH MEMORY AT EXIT: allocated=9281142784 reserved=9502195712"
+ "log_tail": "[    57s] INFO:     Started server process [62995]\n[    57s] INFO:     Waiting for application startup.\n[    57s] INFO:     Application startup complete.\n[    57s] INFO:     Uvicorn running on http://127.0.0.1:30001 (Press CTRL+C to quit)\n[    59s] INFO:     127.0.0.1:33104 - \"GET /v1/models HTTP/1.1\" 200 OK\n[    59s] INFO:     127.0.0.1:33112 - \"POST /v1/chat/completions HTTP/1.1\" 200 OK\n[    59s] VRAM LIMIT EXCEEDED: 11771392000 > 11694766976\n[    59s] TORCH MEMORY AT EXIT: allocated=8608846848 reserved=9871294464"
 }

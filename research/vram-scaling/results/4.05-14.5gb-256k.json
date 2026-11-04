@@ -11,36 +11,36 @@
   "context": 262144,
   "kv_bits": 4,
   "budget": 14500000000.0,
-  "fixed": 9998572288.0,
-  "reserve": 870000000.0,
-  "cache": 3617587200,
-  "slots": 1472,
+  "fixed": 9438572288.0,
+  "reserve": 900000000.0,
+  "cache": 4089446400,
+  "slots": 1664,
   "staging": true,
   "chunk": 8192,
   "ok": true,
   "experimental": false,
-  "ram_for_all_experts": 56780390400,
-  "min_budget": 13318754688.0
+  "ram_for_all_experts": 56308531200,
+  "min_budget": 12758754688.0
  },
  "ram_gib": 38,
- "startup_s": 59.2,
- "model_vram_gb": 13.4,
+ "startup_s": 39.2,
+ "model_vram_gb": 13.32,
  "cold_first": {
   "prompt_tokens": 74,
   "completion_tokens": 600,
-  "ttft_s": 9.018535614013672,
-  "decode_tps": 25.113954167336278,
-  "wall_s": 32.87044596672058
+  "ttft_s": 9.113028049468994,
+  "decode_tps": 25.125049023529105,
+  "wall_s": 32.95396018028259
  },
- "decode_tps_median": 30.341275160471508,
- "decode_tps_min": 29.615850018475193,
- "short_ttft_median_s": 2.93485426902771,
+ "decode_tps_median": 30.543887970918085,
+ "decode_tps_min": 29.066946839677527,
+ "short_ttft_median_s": 2.9406187534332275,
  "long": {
   "prompt_tokens": 0,
   "completion_tokens": 0,
   "ttft_s": null,
   "decode_tps": null,
-  "wall_s": 1.7821784019470215,
+  "wall_s": 2.0203328132629395,
   "prefill_tps": null,
   "needle_found": false
  },
@@ -48,39 +48,39 @@
   {
    "prompt_tokens": 71,
    "completion_tokens": 700,
-   "ttft_s": 2.949739933013916,
-   "decode_tps": 29.615850018475193,
-   "wall_s": 26.552037477493286
+   "ttft_s": 2.9211888313293457,
+   "decode_tps": 29.958686396221147,
+   "wall_s": 26.25343894958496
   },
   {
    "prompt_tokens": 73,
    "completion_tokens": 700,
-   "ttft_s": 2.93485426902771,
-   "decode_tps": 30.66269539958617,
-   "wall_s": 25.731348991394043
+   "ttft_s": 2.9436376094818115,
+   "decode_tps": 30.837031492385318,
+   "wall_s": 25.61130142211914
   },
   {
    "prompt_tokens": 69,
    "completion_tokens": 700,
-   "ttft_s": 2.9246411323547363,
-   "decode_tps": 30.341275160471508,
-   "wall_s": 25.962628602981567
+   "ttft_s": 2.941957473754883,
+   "decode_tps": 30.543887970918085,
+   "wall_s": 25.827165842056274
   },
   {
    "prompt_tokens": 76,
    "completion_tokens": 700,
-   "ttft_s": 2.9267797470092773,
-   "decode_tps": 30.053327518836696,
-   "wall_s": 26.185527801513672
+   "ttft_s": 2.9374232292175293,
+   "decode_tps": 29.066946839677527,
+   "wall_s": 26.985426902770996
   },
   {
    "prompt_tokens": 67,
    "completion_tokens": 700,
-   "ttft_s": 2.9385669231414795,
-   "decode_tps": 30.818705509637713,
-   "wall_s": 25.61965775489807
+   "ttft_s": 2.9406187534332275,
+   "decode_tps": 32.06691366062576,
+   "wall_s": 24.738901376724243
   }
  ],
  "error": "workload failed: <urlopen error [Errno 111] Connection refused>",
- "log_tail": "[   164s] QWEN_PREFILL {\"prompt_tokens\": 70, \"cached_tokens\": 0, \"first_stream_seconds\": 2.9223926880004, \"recurrent_checkpoints\": 0, \"recurrent_cache_bytes\": 0}\n[   187s] INFO:     127.0.0.1:50004 - \"POST /v1/chat/completions HTTP/1.1\" 200 OK\n[   190s] QWEN_PREFILL {\"prompt_tokens\": 77, \"cached_tokens\": 0, \"first_stream_seconds\": 2.9244197829975747, \"recurrent_checkpoints\": 0, \"recurrent_cache_bytes\": 0}\n[   214s] INFO:     127.0.0.1:40386 - \"POST /v1/chat/completions HTTP/1.1\" 200 OK\n[   216s] QWEN_PREFILL {\"prompt_tokens\": 68, \"cached_tokens\": 0, \"first_stream_seconds\": 2.9367322710022563, \"recurrent_checkpoints\": 0, \"recurrent_cache_bytes\": 0}\n[   239s] INFO:     127.0.0.1:59392 - \"POST /v1/chat/completions HTTP/1.1\" 200 OK\n[   239s] VRAM LIMIT EXCEEDED: 15770660864 > 15694766976\n[   239s] TORCH MEMORY AT EXIT: allocated=12454624768 reserved=13583253504"
+ "log_tail": "[   144s] QWEN_PREFILL {\"prompt_tokens\": 70, \"cached_tokens\": 0, \"first_stream_seconds\": 2.9400849500016193, \"recurrent_checkpoints\": 0, \"recurrent_cache_bytes\": 0}\n[   167s] INFO:     127.0.0.1:41182 - \"POST /v1/chat/completions HTTP/1.1\" 200 OK\n[   170s] QWEN_PREFILL {\"prompt_tokens\": 77, \"cached_tokens\": 0, \"first_stream_seconds\": 2.9356303679960547, \"recurrent_checkpoints\": 0, \"recurrent_cache_bytes\": 0}\n[   194s] INFO:     127.0.0.1:59648 - \"POST /v1/chat/completions HTTP/1.1\" 200 OK\n[   197s] QWEN_PREFILL {\"prompt_tokens\": 68, \"cached_tokens\": 0, \"first_stream_seconds\": 2.938673819997348, \"recurrent_checkpoints\": 0, \"recurrent_cache_bytes\": 0}\n[   219s] INFO:     127.0.0.1:55164 - \"POST /v1/chat/completions HTTP/1.1\" 200 OK\n[   219s] VRAM LIMIT EXCEEDED: 15728717824 > 15694766976\n[   219s] TORCH MEMORY AT EXIT: allocated=12497394176 reserved=13499367424"
 }

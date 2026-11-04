@@ -25,8 +25,9 @@ GB = 1e9
 GIB = 1024 ** 3
 EXPERTS_PER_LAYER = 512
 MOE_LAYERS = 48
-ACT_BYTES_PER_TOKEN = 0.15e6
+ACT_BYTES_PER_TOKEN = 0.21e6          # research/4090-long: a 24,576-token chunk fit, 32,768 did not
 PREFILL_EXTRA = 0.3 * GB
+FRAGMENTATION = 0.5 * GB   # torch held 0.8-1 GB more than it used when staging was allocated on small cards
 ELASTIC_SLACK = 0.35 * GB
 CHUNKS = (24576, 16384, 8192, 4096, 2048, 1024)
 NO_STAGE_CHUNK = 1536           # without staging, nv2's pick buffer limits a chunk to 1,638 tokens
@@ -89,7 +90,7 @@ def plan(quant, budget, context=262144, kv_bits=4, chunk=None, max_slots=None):
     room = cache + reserve - ELASTIC_SLACK
     candidates = [chunk] if chunk else CHUNKS
     for c in candidates:
-        if room >= prefill_bytes(quant, c):
+        if room >= prefill_bytes(quant, c) + FRAGMENTATION:
             out.update(chunk=c, ok=True)
             return out
     # staging-free fallback: every miss is read zero-copy from pinned RAM (supported by nv2, not yet measured)
@@ -109,7 +110,7 @@ def plan(quant, budget, context=262144, kv_bits=4, chunk=None, max_slots=None):
 def min_budget(quant, context, kv_bits=4):
     """Smallest budget with staging and the smallest chunk."""
     fixed = fixed_bytes(quant, context, kv_bits)
-    need_cache_plus_reserve = prefill_bytes(quant, CHUNKS[-1]) + ELASTIC_SLACK
+    need_cache_plus_reserve = prefill_bytes(quant, CHUNKS[-1]) + FRAGMENTATION + ELASTIC_SLACK
     return fixed + max(need_cache_plus_reserve, 0.7 * GB + 32 * QUANTS[quant]["rec"])
 
 
