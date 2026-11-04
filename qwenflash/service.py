@@ -483,10 +483,14 @@ class Service:
     async def ensure_ready(self):
         cfg = self.cfg
         busy_deadline = None
+        tried = False
         while True:
             st = self.be.state
             if st == "running":
                 return True, ""
+            if st == "error" and tried:
+                # the start this request triggered failed: report it instead of retrying forever
+                return False, self.be.error or "model failed to start"
             if self.observe:
                 return False, "this manager is in observe mode and does not start the model"
             if self.setup.blocking:
@@ -511,9 +515,8 @@ class Service:
                 if not self.spawn(self.start(tier, "request arrived")):
                     await asyncio.sleep(0.5)
                     continue
+                tried = True
                 await asyncio.sleep(0.5)
-                if self.be.state == "error":
-                    return False, self.be.error or "model failed to start"
                 continue
             busy_deadline = busy_deadline or time.time() + cfg["busy_wait_s"]
             if time.time() > busy_deadline:

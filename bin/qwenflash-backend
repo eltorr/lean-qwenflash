@@ -24,9 +24,7 @@ case "${1:-}" in
     if alive; then echo "running $(cat "$PIDF")"; exit 3; fi
     if [ -n "$(strays)" ]; then echo "stray $(strays)"; exit 4; fi      # another server would hold the port and GPU
     echo "# $(date '+%F %T') start: ${envs[*]} ./run.sh $*" > "$LOG"
-    # bash's printf %(...)T needs no fork per line
-    setsid bash -c 'printf -v t0 "%(%s)T" -1
-      "$@" 2>&1 | while IFS= read -r line; do printf -v now "%(%s)T" -1; printf "[%6ss] %s\n" $((now - t0)) "$line"; done' \
+    setsid bash -c '"$@" 2>&1 | python3 -u bin/qwenflash-timestamp' \
       qwenflash env "${envs[@]}" ./run.sh "$@" >> "$LOG" 2>&1 < /dev/null &
     echo $! > "$PIDF"
     echo "started $!"
