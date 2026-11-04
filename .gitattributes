@@ -1,0 +1,8 @@
+# Engine and setup scripts run inside Linux (WSL or native), so keep LF everywhere except Windows-only launchers.
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.gif binary
+*.png binary
+*.jpg binary
