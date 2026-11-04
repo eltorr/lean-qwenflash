@@ -14,6 +14,9 @@
 !/compile_local.py
 !/append_mtp.py
 !/test_*.py
+!/sizing.py
+!/run.sh
+!/bin/
 /test_qwen_thinking.py
 !/tests/
 !/exllamav3/

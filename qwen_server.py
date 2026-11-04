@@ -37,7 +37,8 @@ def main():
     ap=argparse.ArgumentParser()
     ap.add_argument('--model',default=str(ROOT/'model'));ap.add_argument('--store',default=str(ROOT/'store/qwen.bin'))
     ap.add_argument('--ram-gb',type=float,required=True);ap.add_argument('--cache',type=int,default=262144)
-    ap.add_argument('--chunk',type=int,default=24576);ap.add_argument('--host',default='127.0.0.1')
+    # prefill chunk: smaller cards need smaller chunks (sizing.py picks one; run.sh passes it as QWEN_CHUNK)
+    ap.add_argument('--chunk',type=int,default=int(os.environ.get('QWEN_CHUNK','24576')));ap.add_argument('--host',default='127.0.0.1')
     ap.add_argument('--port',type=int,default=30000);ap.add_argument('--served-name',default='qwen3.8-flash-next')
     cli=ap.parse_args()
     os.environ['QWEN_EXL3_SOURCE']='1'
