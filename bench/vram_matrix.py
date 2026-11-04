@@ -5,7 +5,9 @@ Runs on the engine side (native Linux or inside WSL) with the engine's venv pyth
   .venv/bin/python bench/vram_matrix.py --runs 3.05:30:262144,3.05:14.5:262144,3.05:10.5:65536 \
       --out research/vram-scaling/results
 
-Each run is QUANT:USABLE_GB:CONTEXT. USABLE_GB is the VRAM left for the model: a ballast process (vram_ballast.py)
+Each run is QUANT:USABLE_GB:CONTEXT[:nostage]. ":nostage" forces the staging-free path (prefill reads every miss
+zero-copy from pinned RAM, 1,536-token chunks, small reserve) even where sizing.py says the card is too small:
+that is how the 8 GB experiments run. USABLE_GB is the VRAM left for the model: a ballast process (vram_ballast.py)
 holds the rest of the card, so the engine sizes its expert cache, chunk and staging exactly as on a smaller card
 (run.sh asks sizing.py for the plan). What this cannot emulate: a smaller card's memory bandwidth, compute and PCIe
 link. Absolute speeds are therefore those of this GPU with less VRAM; the scaling between rows is the result.
@@ -119,8 +121,8 @@ def backend(*args):
     return sh("bash", "bin/qwenflash-backend", *args)
 
 
-def one(quant, usable_gb, context, port, out_dir):
-    label = f"{quant}-{usable_gb:g}gb-{context // 1024}k"
+def one(quant, usable_gb, context, port, out_dir, nostage=False):
+    label = f"{quant}-{usable_gb:g}gb-{context // 1024}k" + ("-nostage" if nostage else "")
     print(f"=== {label}", flush=True)
     backend("stop", "20")
     time.sleep(3)
@@ -131,13 +133,16 @@ def one(quant, usable_gb, context, port, out_dir):
     rec = {"label": label, "quant": quant, "usable_gb_target": usable_gb, "context": context,
            "ballast_gb": round(held / GB, 2), "free_at_start_gb": round(budget / GB, 2),
            "plan": {k: v for k, v in plan.items() if isinstance(v, (int, float, str, bool)) or v is None}}
-    if not plan["ok"]:
+    rec["nostage"] = nostage
+    if not plan["ok"] and not nostage:
         rec["error"] = plan.get("reason")
         print("  does not fit:", rec["error"], flush=True)
     else:
-        ram_gib = int(min(plan["ram_for_all_experts"] / GIB + 1, 38))
+        ram_gib = int(min(max(plan["ram_for_all_experts"], sizing.expert_bytes(quant) - 0.5 * GB) / GIB + 1, 38))             if nostage else int(min(plan["ram_for_all_experts"] / GIB + 1, 38))
         env = [f"QUANT={quant}", f"CONTEXT={context}", f"PORT={port}", "HOST=127.0.0.1", f"RAM_GB={ram_gib}",
                f"QWEN_VRAM_LIMIT_BYTES={int(total - 0.2 * GB)}", f"QWEN_VRAM_GUARD_BYTES={int(total + 2 * GB)}"]
+        if nostage:
+            env += ["QWEN_CHUNK=1536", "QWEN38_EC_STAGE_GB=0", "QWEN38_EC_ELASTIC_GB=0", "QWEN38_EC_RESERVE_GB=0.35"]
         rec["ram_gib"] = ram_gib
         t0 = time.time()
         r = backend("start", *env, "--", "server")
@@ -201,8 +206,8 @@ def main():
     ap.add_argument("--port", type=int, default=30001)
     a = ap.parse_args()
     for spec in a.runs.split(","):
-        q, gb, ctx = spec.split(":")
-        one(q, float(gb), int(ctx), a.port, a.out)
+        q, gb, ctx, *flags = spec.split(":")
+        one(q, float(gb), int(ctx), a.port, a.out, nostage="nostage" in flags)
     print("MATRIX_DONE", flush=True)
 
 

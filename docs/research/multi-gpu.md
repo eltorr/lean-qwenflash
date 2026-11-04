@@ -13,9 +13,9 @@
 
 - `qwen38/nv2.py`: the global `NV` is overwritten by each `attach_pool`. It asserts that the pool holds layers `0..L-1` with `first == 0` and the full `E`. `kernels/nv2/nv2_host.cpp` has `static Engine* G`: one controller, one reader pool, one RAM tier.
 - `nv_tier.py` `HostArena` uses `cudaHostRegister(...,2)`: Mapped but not Portable, so the pinned memory belongs to one GPU's context. The WSL path, `wsl_pinned.py`, is already Portable\|Mapped.
-- `qwen_offload.py`: `mem_get_info` and the memory fraction act on the current device only, with one `QWEN_VRAM_LIMIT_BYTES` for all GPUs. `memory_guard.py` and `switcher.py` read NVML index 0. `k_lookahead.py` uses `current_device()`. `setup/run_5090.sh` builds for `TORCH_CUDA_ARCH_LIST="12.0"` only.
+- `qwen_offload.py`: `mem_get_info` and the memory fraction act on the current device only, with one `QWEN_VRAM_LIMIT_BYTES` for all GPUs. `memory_guard.py` and the manager (`qwenflash/host.py`) read NVML index 0. `k_lookahead.py` uses `current_device()`. The build targets one architecture, the GPU's own (`setup/30_build.sh`).
 - Already per-device: `expert_cache.attach_modules` builds one `Pool` per device, and the loader keeps a bounce slot per device.
-- **Today's risk:** if a second GPU is visible and exllamav3's autosplit puts a layer on it, the `nv2` assert fails. Pin the server with `CUDA_VISIBLE_DEVICES` (upstream `docker/entrypoint.sh` warns the same way).
+- **Today's risk:** if a second GPU is visible and exllamav3's autosplit puts a layer on it, the `nv2` assert fails. `run.sh` therefore pins the server to one GPU (`QWEN_GPU`, default 0) when several are visible (upstream `docker/entrypoint.sh` warns the same way).
 
 ## What limits decode here
 
