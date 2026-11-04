@@ -23,13 +23,15 @@ def load(model_dir, store, chunk=2048, cache_tokens=16384, ram_gb=6.0, cpu=False
         'QWEN38_EC_ELASTIC_GB': '6', 'QWEN38_EC_RESERVE_GB': '1.7',
         'QWEN38_NV_COPY_GRID': '24', 'QWEN38_EC_COPY_GRID': '24',
         'EXL3_NGRAM_STREAM': '1', 'QWEN_VRAM_LIMIT_BYTES': '16000000000',
-        'MAX_JOBS': '4', 'TORCH_CUDA_ARCH_LIST': '8.9',
+        'MAX_JOBS': '4',
         # Local patch: upstream hardcoded a 15 GB torch cap; keep that default but allow override
         'QWEN_TORCH_LIMIT_BYTES': '15000000000',
     }
     for k,v in env.items(): os.environ.setdefault(k,v)
     torch.set_num_threads(1)
     torch.cuda.init()
+    # JIT-built kernels target the GPU that is actually here (upstream hard-coded 8.9, the RTX 4090)
+    os.environ.setdefault('TORCH_CUDA_ARCH_LIST', '%d.%d' % torch.cuda.get_device_capability())
     _, total = torch.cuda.mem_get_info()
     # Leave room for CUDA context and non-PyTorch allocations as well as allocator fragmentation.
     torch.cuda.set_per_process_memory_fraction(min(1.0, int(os.environ['QWEN_TORCH_LIMIT_BYTES']) / total))
