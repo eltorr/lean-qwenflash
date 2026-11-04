@@ -32,6 +32,8 @@
 !/research/4090-final/
 !/research/4090-long/
 !/research/local-expert-ram-compare/
+!/research/rtx5090-wsl/
+!/research/vram-scaling/
 /research/4090-final/*
 !/research/4090-final/REPORT.md
 !/research/4090-final/results/
