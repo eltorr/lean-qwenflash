@@ -63,6 +63,18 @@ Benchmarked using `turboderp/Qwen3.8-Flash-Next-exl3` (`3.05bpw_h5_ng5`) with 4-
 | **RTX 3080 Laptop (16GB)** | 100k (16 GB cache) | 23.9 GB | 15.5 GB | 693 tok/s | 20.9 tok/s |
 | **RTX 4090** | 17 tokens (4 GB cache, unquantized KV) | 8.55 GB | 14.90 GB | — | 16.0 tok/s (code) |
 
+**This fork, RTX 5090 (WSL2), capped to smaller cards** ([full table and method](research/vram-scaling/REPORT.md)).
+The caps emulate VRAM capacity only: real smaller cards also have less bandwidth and slower PCIe, so expect less.
+
+| Card class (VRAM for the model) | Quant | Context | Prefill | Decode |
+| :--- | :--- | :--- | :--- | :--- |
+| **32 GB** (30 GB) | 3.05 / 4.05 | 262k | 5,754 / 5,293 tok/s | 64.0 / 56.1 tok/s |
+| **24 GB** (22 GB) | 3.05 / 4.05 | 262k | 5,896 / 5,006 tok/s | 51.5 / 42.6 tok/s |
+| **16 GB** (14.5 GB) | 3.05 / 4.05 | 262k | 4,338 / 1,384 tok/s | 37.8 / 30.3 tok/s |
+| **12 GB** (10.5 GB) | 3.05 | 64k / 128k | 1,816 / 1,564 tok/s | 33.2 / 29.9 tok/s |
+| **12 GB** (10.5 GB) | 4.05 | 32k | 431 tok/s | 26.6 tok/s |
+| **8 GB, not driving a display** (8 GB) | 3.05 | 16k | 1,166 tok/s | 20.2 tok/s |
+
 ---
 
 ## How It Works
@@ -80,10 +92,14 @@ Qwen3.8-Flash-Next activates only 10 of its 512 experts per layer per token (~2%
 ## Quickstart
 
 ### 1. Requirements
-* Linux (x86_64)
-* NVIDIA GPU with at least 16 GB VRAM
+* Linux (x86_64), or Windows 10/11 with the engine in WSL2 (the [manager](docs/manager.md) sets that up)
+* NVIDIA GPU, Turing or newer, with at least 12 GB VRAM (16 GB+ recommended). An 8 GB card works at 16k context if
+  it doesn't also drive a display ([measurements](research/vram-scaling/REPORT.md))
 * Fast NVMe SSD (PCIe 3.0 or 4.0, ~3+ GB/s read throughput)
-* CUDA 12.4+ and Python 3.10–3.12
+* CUDA 12.4+ (12.8 for RTX 50 cards) and Python 3.10–3.12
+
+With the manager, `qwenflash setup` (or the dashboard's Setup tab) runs the steps below for you and sizes everything
+for your card. `./run.sh server` starts the server sized from the hardware, without the manager.
 
 ### 2. Install
 
@@ -160,8 +176,18 @@ python infer.py \
 
 If I get some free time—or someone wants to contribute or put an agent on it:
 
-- **Lower VRAM:** Adapt and benchmark on 12 GB, and potentially 8 GB GPUs. I expect adapting the existing cache and staging budgets to be relatively straightforward; neither configuration has been tested yet.
-- **Higher VRAM:** Benchmark 24 GB and 32 GB GPUs to see how prefill and decode scale as more experts fit in VRAM.
+- ~~**Lower VRAM:** Adapt and benchmark on 12 GB, and potentially 8 GB GPUs.~~
+  - **Done in this fork:** `sizing.py` sizes the cache, prefill chunk, staging and reserve for the card. 12 GB runs
+    3.05 bpw up to 128k context and 4.05 at 32k. 8 GB runs 3.05 at 16k when the card has no display attached.
+    Measured with the engine capped on an RTX 5090 ([report](research/vram-scaling/REPORT.md)).
+  - **Still open:** real 8-12 GB cards; an 8 GB card that also drives a desktop. For the latter, shrink the ~6.2 GB
+    fixed footprint first (≈2.5 GB of it is not yet attributed; per-expert scales could move into the expert
+    records).
+- ~~**Higher VRAM:** Benchmark 24 GB and 32 GB GPUs.~~ **Done:** decode 51.5 / 64 tok/s (3.05) at 24 / 32 GB; prefill
+  stays ~5,800 tok/s ([report](research/vram-scaling/REPORT.md)).
+- **Prefill on 12-16 GB cards:** a single staging buffer, to keep big chunks where two don't fit.
+- **Two GPUs:** not supported by the offload layer yet. A layer split looks like the best fit
+  ([research notes](docs/research/multi-gpu.md)).
 
 ---
 

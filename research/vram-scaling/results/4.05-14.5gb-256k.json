@@ -16,71 +16,80 @@
   "cache": 4089446400,
   "slots": 1664,
   "staging": true,
-  "chunk": 8192,
+  "chunk": 4096,
   "ok": true,
   "experimental": false,
   "ram_for_all_experts": 56308531200,
-  "min_budget": 12758754688.0
+  "min_budget": 13320194688.0
  },
  "ram_gib": 38,
- "startup_s": 39.2,
- "model_vram_gb": 13.32,
+ "startup_s": 56.2,
+ "model_vram_gb": 13.34,
  "cold_first": {
   "prompt_tokens": 74,
   "completion_tokens": 600,
-  "ttft_s": 9.113028049468994,
-  "decode_tps": 25.125049023529105,
-  "wall_s": 32.95396018028259
+  "ttft_s": 8.34203290939331,
+  "decode_tps": 25.094606595729687,
+  "wall_s": 32.211976528167725
  },
- "decode_tps_median": 30.543887970918085,
- "decode_tps_min": 29.066946839677527,
- "short_ttft_median_s": 2.9406187534332275,
+ "decode_tps_median": 30.267554657998406,
+ "decode_tps_min": 29.805628291472726,
+ "short_ttft_median_s": 2.933281660079956,
  "long": {
-  "prompt_tokens": 0,
-  "completion_tokens": 0,
-  "ttft_s": null,
-  "decode_tps": null,
-  "wall_s": 2.0203328132629395,
-  "prefill_tps": null,
-  "needle_found": false
+  "prompt_tokens": 93938,
+  "completion_tokens": 190,
+  "ttft_s": 67.88411808013916,
+  "decode_tps": 12.866773654503087,
+  "wall_s": 82.64377975463867,
+  "prefill_tps": 1383.7993724703542,
+  "needle_found": true
  },
  "decode_runs": [
   {
    "prompt_tokens": 71,
    "completion_tokens": 700,
-   "ttft_s": 2.9211888313293457,
-   "decode_tps": 29.958686396221147,
-   "wall_s": 26.25343894958496
+   "ttft_s": 2.92810320854187,
+   "decode_tps": 29.805628291472726,
+   "wall_s": 26.380179405212402
   },
   {
    "prompt_tokens": 73,
    "completion_tokens": 700,
-   "ttft_s": 2.9436376094818115,
-   "decode_tps": 30.837031492385318,
-   "wall_s": 25.61130142211914
+   "ttft_s": 2.9377493858337402,
+   "decode_tps": 29.9684279216733,
+   "wall_s": 26.262405395507812
   },
   {
    "prompt_tokens": 69,
    "completion_tokens": 700,
-   "ttft_s": 2.941957473754883,
-   "decode_tps": 30.543887970918085,
-   "wall_s": 25.827165842056274
+   "ttft_s": 2.9335150718688965,
+   "decode_tps": 30.267554657998406,
+   "wall_s": 26.027619123458862
   },
   {
    "prompt_tokens": 76,
    "completion_tokens": 700,
-   "ttft_s": 2.9374232292175293,
-   "decode_tps": 29.066946839677527,
-   "wall_s": 26.985426902770996
+   "ttft_s": 2.933281660079956,
+   "decode_tps": 30.467805014469413,
+   "wall_s": 25.87560200691223
   },
   {
    "prompt_tokens": 67,
    "completion_tokens": 700,
-   "ttft_s": 2.9406187534332275,
-   "decode_tps": 32.06691366062576,
-   "wall_s": 24.738901376724243
+   "ttft_s": 2.927276372909546,
+   "decode_tps": 33.09495508983777,
+   "wall_s": 24.04838991165161
   }
  ],
- "error": "workload failed: <urlopen error [Errno 111] Connection refused>",
- "log_tail": "[   144s] QWEN_PREFILL {\"prompt_tokens\": 70, \"cached_tokens\": 0, \"first_stream_seconds\": 2.9400849500016193, \"recurrent_checkpoints\": 0, \"recurrent_cache_bytes\": 0}\n[   167s] INFO:     127.0.0.1:41182 - \"POST /v1/chat/completions HTTP/1.1\" 200 OK\n[   170s] QWEN_PREFILL {\"prompt_tokens\": 77, \"cached_tokens\": 0, \"first_stream_seconds\": 2.9356303679960547, \"recurrent_checkpoints\": 0, \"recurrent_cache_bytes\": 0}\n[   194s] INFO:     127.0.0.1:59648 - \"POST /v1/chat/completions HTTP/1.1\" 200 OK\n[   197s] QWEN_PREFILL {\"prompt_tokens\": 68, \"cached_tokens\": 0, \"first_stream_seconds\": 2.938673819997348, \"recurrent_checkpoints\": 0, \"recurrent_cache_bytes\": 0}\n[   219s] INFO:     127.0.0.1:55164 - \"POST /v1/chat/completions HTTP/1.1\" 200 OK\n[   219s] VRAM LIMIT EXCEEDED: 15728717824 > 15694766976\n[   219s] TORCH MEMORY AT EXIT: allocated=12497394176 reserved=13499367424"
+ "engine": {
+  "slots": 1600,
+  "arena_gb": 3.93,
+  "mem_peak_gb": 12.53,
+  "hit_rate": 0.0022,
+  "stage_overflow": 0,
+  "ram_slots": 16602,
+  "picks_vram_pct": 56.4,
+  "picks_ram_pct": 41.1,
+  "picks_nvme_pct": 2.5
+ }
 }

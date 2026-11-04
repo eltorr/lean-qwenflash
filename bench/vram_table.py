@@ -25,15 +25,18 @@ def main(d):
         chunk = "1,536, no staging" if r.get("nostage") or plan.get("staging") is False else f"{plan.get('chunk') or 0:,}"
         head = (f"| {card_class(r['usable_gb'])} | {r['quant']} | {r['usable_gb']:g} GB | {r['context'] // 1024}K | "
                 f"{chunk if plan.get('ok') or r.get('nostage') else '-'} |")
-        if not r.get("decode_tps_median"):
-            why = str(r.get("error") or "no result").splitlines()[0][:120]
-            print(f"{head} - | - | **does not run**: {why} | - | - | {fmt(r.get('startup_s'), '{:.0f} s')} |")
+        if not r.get("decode_tps_median") or r.get("error"):
+            tail = r.get("log_tail") or ""
+            why = ("ran out of VRAM" + (" on the long prompt" if r.get("decode_tps_median") else " on the first request")
+                   if "VRAM LIMIT EXCEEDED" in tail else str(r.get("error") or "no result").splitlines()[0][:100])
+            dec = f" (decode {fmt(r['decode_tps_median'])} tok/s before that)" if r.get("decode_tps_median") else ""
+            print(f"{head} - | - | **fails**: {why}{dec} | - | - | {fmt(r.get('startup_s'), '{:.0f} s')} |")
             continue
         picks = (f"{e['picks_vram_pct']:.0f} / {e['picks_ram_pct']:.0f} / {e['picks_nvme_pct']:.0f} %"
                  if e.get("picks_vram_pct") is not None else "-")
         prefill = (f"{long['prefill_tps']:,.0f} tok/s ({long['prompt_tokens'] // 1000}K prompt"
                    f"{'' if long.get('needle_found') else ', needle missed'})" if long.get("prefill_tps") else "-")
-        print(f"{head} {e.get('slots', '-'):,} | {picks} | **{fmt(r['decode_tps_median'])}** "
+        print(f"{head} {e.get('slots') or 0:,} | {picks} | **{fmt(r['decode_tps_median'])}** "
               f"({fmt(r.get('decode_tps_min'))}) tok/s | {prefill} | {fmt(r.get('short_ttft_median_s'), '{:.2f} s')} | "
               f"{fmt(r.get('startup_s'), '{:.0f} s')} |")
 
