@@ -14,6 +14,42 @@ Built on [ExLlamaV3](https://github.com/turboderp-org/exllamav3) and adapted fro
 
 ---
 
+## QwenFlash (this fork)
+
+This fork adds a manager and makes the engine size itself to the machine it runs on:
+
+- **Runs on native Linux or on Windows**, where the engine lives in WSL2 and the manager runs on Windows. Any NVIDIA
+  GPU from Turing on; it plans VRAM, prefill chunk and RAM cache for the card ([`sizing.py`](sizing.py)).
+- **Manager with a local web dashboard.**
+  - Serves an OpenAI-compatible endpoint and an Ollama-style front door.
+  - Loads the model when it's called, scales it back or pauses it when games or other GPU apps need the card, and
+    re-saturates afterwards.
+  - Recovers from crashes, and learns lower limits after running out of memory.
+  - Keeps the model running across its own restarts.
+  - Shows live speed.
+- **Setup that detects the platform.** It handles WSL install and `.wslconfig` on Windows, and checks the driver on
+  Linux. It recommends settings for the hardware, then runs the build and model steps. Each step can also be run
+  from a terminal.
+- **Engine fixes:**
+  - VRAM/RAM limits are configurable.
+  - Pinned memory works under WSL2.
+  - Prefill staging is sized per layer (4.05 bpw no longer overflows).
+  - OpenAI `reasoning_effort` values are accepted.
+  - Kernels are built for the local GPU.
+  - The RAM guard tolerates a missing cgroup.
+  - `run.sh` launches on any card; `bin/qwenflash-backend` runs the server detached.
+
+| | Windows 10/11 | Linux |
+|---|---|---|
+| Start | double-click `QwenFlash.cmd` | `./qwenflash.sh open` |
+| Then | Setup tab: run the steps top to bottom | Setup tab, or `./qwenflash.sh setup STEP` in a terminal |
+| Clients | `http://127.0.0.1:30000/v1`, model `qwen3.8-flash-next` | same |
+
+Guides: [manager](docs/manager.md) · [API](docs/api.md) · [VRAM scaling results](research/vram-scaling/REPORT.md) ·
+[multi-GPU notes](docs/research/multi-gpu.md).
+
+---
+
 ## Measured Performance
 
 Benchmarked using `turboderp/Qwen3.8-Flash-Next-exl3` (`3.05bpw_h5_ng5`) with 4-bit KV cache unless noted:
