@@ -14,6 +14,8 @@
 # The QwenFlash manager computes all of these from what is free right now; the defaults below suit a manual run.
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
+[ -f /etc/profile.d/cuda.sh ] && source /etc/profile.d/cuda.sh
+[ -d /usr/lib/wsl/lib ] && case ":$PATH:" in *:/usr/lib/wsl/lib:*) ;; *) PATH="$PATH:/usr/lib/wsl/lib" ;; esac
 GB=1000000000
 GIB=1073741824
 calc() { awk "BEGIN { printf \"%d\", $1 }"; }
