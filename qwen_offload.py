@@ -24,13 +24,15 @@ def load(model_dir, store, chunk=2048, cache_tokens=16384, ram_gb=6.0, cpu=False
         'QWEN38_NV_COPY_GRID': '24', 'QWEN38_EC_COPY_GRID': '24',
         'EXL3_NGRAM_STREAM': '1', 'QWEN_VRAM_LIMIT_BYTES': '16000000000',
         'MAX_JOBS': '4', 'TORCH_CUDA_ARCH_LIST': '8.9',
+        # Local patch: upstream hardcoded a 15 GB torch cap; keep that default but allow override
+        'QWEN_TORCH_LIMIT_BYTES': '15000000000',
     }
     for k,v in env.items(): os.environ.setdefault(k,v)
     torch.set_num_threads(1)
     torch.cuda.init()
     _, total = torch.cuda.mem_get_info()
     # Leave room for CUDA context and non-PyTorch allocations as well as allocator fragmentation.
-    torch.cuda.set_per_process_memory_fraction(15_000_000_000 / total)
+    torch.cuda.set_per_process_memory_fraction(min(1.0, int(os.environ['QWEN_TORCH_LIMIT_BYTES']) / total))
     if os.environ.get('QWEN_EXL3_SOURCE')=='1':
         sys.path.insert(0,str(ROOT/'exllamav3'))
     from exllamav3 import model_init
