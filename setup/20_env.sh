@@ -37,21 +37,20 @@ cd "$R"
 cuda_env
 [ -d .venv ] || python3 -m venv .venv
 source .venv/bin/activate
-if python - <<'PY' 2>/dev/null
-import importlib.util, sys
-import torch
-ok = torch.version.cuda and torch.version.cuda.startswith("12.") and all(
-    importlib.util.find_spec(m) for m in ("fastapi", "uvicorn", "safetensors", "jinja2", "numpy", "ninja"))
-sys.exit(0 if ok else 1)
-PY
-then
-  echo "Python environment ready: $(python -c 'import torch; print("torch", torch.__version__)')"
-else
-  pip install -q --upgrade pip
-  echo "installing PyTorch (CUDA 12.8 build)..."
-  pip install -q torch --index-url https://download.pytorch.org/whl/cu128
-  pip install -q fastapi uvicorn safetensors jinja2 huggingface_hub numpy ninja
+# file checks only: importing torch from a cold WSL page cache takes minutes
+have_env() {
+  grep -q +cu12 "$1/torch/version.py" 2>/dev/null || return 1
+  for m in fastapi uvicorn safetensors jinja2 numpy ninja; do [ -e "$1/$m" ] || return 1; done
+}
+SP=$(site_packages)
+if [ -n "$SP" ] && have_env "$SP"; then
+  echo "Python environment ready: torch $(sed -n "s/^__version__ = '\(.*\)'/\1/p" "$SP/torch/version.py")"
+  exit 0
 fi
+pip install -q --upgrade pip
+echo "installing PyTorch (CUDA 12.8 build)..."
+pip install -q torch --index-url https://download.pytorch.org/whl/cu128
+pip install -q fastapi uvicorn safetensors jinja2 huggingface_hub numpy ninja
 python - <<'PY'
 import torch
 print("torch", torch.__version__, "| CUDA", torch.version.cuda, "| GPU", torch.cuda.get_device_name(0),
