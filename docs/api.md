@@ -104,7 +104,11 @@ the private link's cookie).
 |---|---|---|
 | GET | `status` | State, profile, pressure, GPU and RAM, counters, speed, events |
 | GET | `metrics` | The last 100 requests: tokens, time to first token, speeds |
-| GET / POST | `config` | POST `{"config": {"quant": "4.05"}}`; keys as in `config.json` |
+| GET / POST | `config` | POST `{"config": {"quant": "4.05"}}`; keys as in `config.json`, except the paths, programs, ports and token, which only `config.json` changes |
 | POST | `action` | `{"action": "start_full"}`. Also `start_lean`, `pause`, `restart`, `auto_on`/`auto_off`, `wake_on`/`wake_off`, `new_remote_link`, `quit`, `quit_keep_model` |
 | GET | `log` | Tails of the model's and the manager's logs |
 | GET / POST | `setup`, `setup/run` | Setup status; `{"step": "build"}` runs one step |
+
+Requests that a web page on another site sends are refused: a browser's POST must come from the dashboard's own
+address. On port 30000, the dashboard only answers requests addressed to `127.0.0.1`, `localhost` or `::1`, so a
+website can't reach it by pointing its own domain at this PC.

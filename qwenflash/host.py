@@ -10,6 +10,7 @@ import asyncio
 import collections
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -186,9 +187,9 @@ class Host:
         if self.follower and self.follower.is_alive():
             return self.follower
         log_path = f"{self.engine_dir}/.qwenflash/backend.log"
-        self.follower = LogFollower(self.engine_argv("bash", "-c", f"mkdir -p '{self.engine_dir}/.qwenflash'; "
-                                                                   f"touch '{log_path}'; exec tail -n 400 -F '{log_path}'"),
-                                    self.env)
+        d, log = shlex.quote(f"{self.engine_dir}/.qwenflash"), shlex.quote(log_path)
+        self.follower = LogFollower(self.engine_argv("bash", "-c", f"mkdir -p {d}; touch {log}; "
+                                                                   f"exec tail -n 400 -F {log}"), self.env)
         self.follower.start()
         return self.follower
 

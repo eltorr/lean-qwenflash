@@ -3,8 +3,8 @@ import json
 
 HOP = {"connection", "keep-alive", "proxy-connection", "host", "content-length", "transfer-encoding", "upgrade", "te",
        "expect"}
-REASONS = {200: "OK", 302: "Found", 400: "Bad Request", 401: "Unauthorized", 404: "Not Found", 409: "Conflict",
-           502: "Bad Gateway", 503: "Service Unavailable"}
+REASONS = {200: "OK", 302: "Found", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
+           409: "Conflict", 502: "Bad Gateway", 503: "Service Unavailable"}
 
 
 async def read_request(reader, writer=None):

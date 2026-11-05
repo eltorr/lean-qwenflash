@@ -86,6 +86,8 @@ DEFAULTS = {
 }
 # settings that only take effect when the service restarts
 SERVICE_KEYS = {"listen_port", "backend_port", "listen_host", "repo_dir", "distro", "network_port"}
+# settings that name programs, paths, ports or the private link: only config.json changes them, never the HTTP API
+FILE_ONLY_KEYS = SERVICE_KEYS | {"wsl_location", "ui_browser", "dashboard_token"}
 RENAMED = {"windows_ram_reserve_gb": "ram_reserve_gb"}
 
 logging.basicConfig(filename=LOG_DIR / "manager.log", level=logging.INFO,

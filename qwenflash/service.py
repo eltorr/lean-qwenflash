@@ -664,10 +664,12 @@ class Service:
         return any(g and hmac.compare_digest(g.encode(), tok.encode()) for g in given)
 
     def authorized(self, headers, target):
-        """The dashboard on the main port: open on loopback, otherwise it needs the token."""
-        if self.cfg["listen_host"] in ("127.0.0.1", "localhost", "::1") or not self.cfg["dashboard_token"]:
-            return True
-        return self.token_ok(headers, target)
+        """The dashboard on the main port. Listening on loopback only, it is open to this PC's programs and browser,
+        but only for requests addressed to 127.0.0.1, localhost or ::1: a web page that points its own domain at
+        127.0.0.1 (DNS rebinding) is refused. A main port open to the network needs the token."""
+        if self.cfg["listen_host"] in LOCAL_NAMES:
+            return host_name(headers) in LOCAL_NAMES or self.token_ok(headers, target)
+        return not self.cfg["dashboard_token"] or self.token_ok(headers, target)
 
     async def handle(self, reader, writer):
         try:
@@ -684,7 +686,11 @@ class Service:
         dash = path.startswith("/_switcher") or path == "/"
         page = path in ("/", "/_switcher", "/_switcher/", "/_switcher/index.html")
         try:
-            if dash and front and self.token_ok(headers, target):
+            if method not in ("GET", "HEAD") and not same_origin(headers):
+                # a web page on another site sending a request here (cross-site request forgery)
+                await respond(writer, 403, {"error": "requests from other websites are refused"})
+                close(writer)
+            elif dash and front and self.token_ok(headers, target):
                 await self.api(method, path, target, body, writer)
                 close(writer)
             elif front and page and method in ("GET", "HEAD"):
@@ -694,8 +700,9 @@ class Service:
                 if front:
                     await respond(writer, 401, {"error": "the dashboard needs its private link"})
                 elif not self.authorized(headers, target):
-                    await respond(writer, 401, b"QwenFlash dashboard: open it with ?token=<dashboard_token>",
-                                  "text/plain")
+                    await respond(writer, 401, f"QwenFlash dashboard: open it at http://127.0.0.1:"
+                                               f"{self.cfg['listen_port']}/ on this PC, or with its private link"
+                                               .encode(), "text/plain")
                 else:
                     await self.api(method, path, target, body, writer)
                 close(writer)
@@ -827,17 +834,24 @@ class Service:
     def update_config(self, changes):
         restart_keys = {"quant", "context", "lean_vram_gb", "lean_ram_gb", "full_vram_headroom_gb", "max_ram_cache_gib"}
         changed, service = [], []
-        for k, v in changes.items():
+        new = {}
+        for k, v in changes.items():   # check every value before changing any
             if k not in config.DEFAULTS:
                 continue
             try:
                 v = config.coerce(k, v)
             except (TypeError, ValueError):
                 return 400, {"ok": False, "message": f"bad value for {k}"}
+            if k in config.FILE_ONLY_KEYS and v != self.cfg[k]:
+                return 400, {"ok": False, "message": f"{k} can only be changed in config.json"}
             if k == "quant" and v not in sizing.QUANTS:
                 return 400, {"ok": False, "message": "unknown quant"}
             if k == "context" and not 4096 <= v <= 262144:
                 return 400, {"ok": False, "message": "context must be between 4096 and 262144"}
+            if k == "remote_host" and not re.fullmatch(r"[A-Za-z0-9.-]*", v):
+                return 400, {"ok": False, "message": "the PC's name can only have letters, digits, dots and dashes"}
+            new[k] = v
+        for k, v in new.items():
             if self.cfg[k] != v:
                 self.cfg[k] = v
                 (service if k in SERVICE_KEYS else changed).append(k)
@@ -1029,6 +1043,33 @@ class Service:
             await self.quit.wait()
         if self.host.follower:
             self.host.follower.stop()
+
+
+LOCAL_NAMES = ("127.0.0.1", "localhost", "::1")
+
+
+def header(headers, name):
+    return next((v for k, v in headers if k.lower() == name), "")
+
+
+def host_name(headers):
+    """The Host header's name without the port: 'localhost:30000' -> 'localhost', '[::1]:30000' -> '::1'."""
+    try:
+        return urllib.parse.urlsplit("//" + header(headers, "host")).hostname or ""
+    except ValueError:
+        return ""
+
+
+def same_origin(headers):
+    """False for a request that a web page on another site sent here. Browsers name the sending page in Origin;
+    programs (curl, Hermes, the CLI) send none and pass."""
+    origin = header(headers, "origin")
+    if not origin:
+        return True
+    try:
+        return urllib.parse.urlsplit(origin).netloc.lower() == header(headers, "host").lower()
+    except ValueError:
+        return False
 
 
 def query_token(target):
