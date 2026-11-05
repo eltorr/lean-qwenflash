@@ -7,6 +7,6 @@ cd "$(dirname "$(readlink -f "$0")")"
 if [ ! -x .venv-manager/bin/python ]; then
   echo "creating the manager's Python environment (.venv-manager)..."
   python3 -m venv .venv-manager
-  .venv-manager/bin/pip install -q psutil
+  .venv-manager/bin/pip install -q --require-hashes -r qwenflash/requirements.txt
 fi
 exec .venv-manager/bin/python -m qwenflash "$@"

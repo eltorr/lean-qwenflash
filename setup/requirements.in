@@ -1,0 +1,26 @@
+# The engine's Python packages, at the versions tested together. setup/requirements.txt pins these and everything
+# they pull in to exact files by hash; after changing this list, regenerate it with: bash tools/lock.sh
+torch==2.11.0+cu128            # from PyTorch's CUDA 12.8 index
+setuptools==81.0.0             # torch 2.11 needs it below 82; also builds exllamav3
+fastapi==0.162.0
+uvicorn==0.54.0
+safetensors==0.8.0
+jinja2==3.1.6
+huggingface_hub==2.4.0
+numpy==2.5.4
+ninja==1.13.2
+# exllamav3's own dependencies (it is installed with --no-deps)
+tokenizers==0.23.3
+rich==15.0.0
+typing_extensions==4.16.0
+pillow==13.0.0
+pyyaml==6.0.3
+marisa-trie==1.4.1
+pydantic==2.14.2
+llguidance==1.9.1
+# indirect dependencies, held at the versions tested with the above
+cuda-bindings==12.9.7
+cuda-pathfinder==1.6.0
+filelock==4.2.4
+markupsafe==3.0.3
+typing-inspection==0.4.4

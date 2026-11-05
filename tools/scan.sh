@@ -26,7 +26,7 @@ pick_python() {   # a Python 3.10+ to create the environment with (never the Win
 if ! cmp -s tools/scan-requirements.txt "$VENV/.installed" 2>/dev/null; then
   echo "== installing the scanners into $VENV"
   [ -x "$PY" ] || [ -x "$PY.exe" ] || "$(pick_python)" -m venv "$VENV" || exit 1
-  "$PY" -m pip install -q --disable-pip-version-check -r tools/scan-requirements.txt || exit 1
+  "$PY" -m pip install -q --disable-pip-version-check --require-hashes -r tools/scan-requirements.txt || exit 1
   cp tools/scan-requirements.txt "$VENV/.installed"
 fi
 
@@ -52,13 +52,22 @@ no_secrets() {
 step "secrets in tracked files" no_secrets
 
 # --- known vulnerabilities in the pinned packages
-PINNED=(tools/scan-requirements.txt)
+PINNED=(setup/requirements.txt qwenflash/requirements.txt tools/scan-requirements.txt)
+# Accepted advisories, each with its reason. Remove one once its fix can be installed.
+#  - setuptools PYSEC-2026-3447 (sdist exclusion bypass on macOS file systems) and GHSA-xmj3-9gf7-h52w (Windows path
+#    escape in legacy wheel installs): the engine's environment is Linux, and torch 2.11 caps setuptools below 82.
+#  - torch PYSEC-2025-194 (CVE-2025-3000, memory corruption in torch.jit.script on crafted code): the engine never
+#    scripts code it is sent. The fix is in torch 2.13, which has no CUDA 12.8 build.
+IGNORE=(PYSEC-2026-3447 GHSA-xmj3-9gf7-h52w PYSEC-2025-194)
 audit() {
-  local f rc=0
+  local f rc=0 tmp
+  tmp=$(mktemp)
   for f in "${PINNED[@]}"; do
     echo "   $f"
-    "$BIN/pip-audit" --progress-spinner off --disable-pip --no-deps -r "$f" || rc=1
+    sed -E 's/\+cu[0-9]+//' "$f" > "$tmp"     # torch's CUDA builds (2.11.0+cu128) are audited as the PyPI release
+    "$BIN/pip-audit" --progress-spinner off --disable-pip --no-deps -r "$tmp" "${IGNORE[@]/#/--ignore-vuln=}" || rc=1
   done
+  rm -f "$tmp"
   return $rc
 }
 if [ "$offline" = 1 ]; then echo "== known vulnerabilities (pip-audit): skipped (--offline)"

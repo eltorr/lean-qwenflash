@@ -14,7 +14,8 @@ esac
 MAX_JOBS=$(nproc)
 export TORCH_CUDA_ARCH_LIST="$CC" MAX_JOBS
 echo "building exllamav3 for sm_${CC/./} (a few minutes)..."
-pip install -q -e exllamav3
+# its dependencies are pinned in setup/requirements.txt; build with this environment's tools, nothing downloaded
+pip install -q --no-deps --no-build-isolation -e exllamav3
 echo "compiling offload extensions..."
 rm -rf qwen38-flash-offload/build
 python compile_local.py

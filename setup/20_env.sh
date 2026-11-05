@@ -43,14 +43,17 @@ have_env() {
   for m in fastapi uvicorn safetensors jinja2 numpy ninja; do [ -e "$1/$m" ] || return 1; done
 }
 SP=$(site_packages)
-if [ -n "$SP" ] && have_env "$SP"; then
+ready=0
+[ -n "$SP" ] && have_env "$SP" && ready=1
+# Exactly the files in setup/requirements.txt (pip checks each one's hash), so every install gets the tested set and a
+# tampered or swapped download is refused. PyTorch's CUDA build comes from its own index, the rest from PyPI.
+echo "installing the Python packages pinned in setup/requirements.txt..."
+pip install -q --require-hashes -r setup/requirements.txt \
+  --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple
+if [ "$ready" = 1 ]; then
   echo "Python environment ready: torch $(sed -n "s/^__version__ = '\(.*\)'/\1/p" "$SP/torch/version.py")"
   exit 0
 fi
-pip install -q --upgrade pip
-echo "installing PyTorch (CUDA 12.8 build)..."
-pip install -q torch --index-url https://download.pytorch.org/whl/cu128
-pip install -q fastapi uvicorn safetensors jinja2 huggingface_hub numpy ninja
 python - <<'PY'
 import torch
 print("torch", torch.__version__, "| CUDA", torch.version.cuda, "| GPU", torch.cuda.get_device_name(0),
