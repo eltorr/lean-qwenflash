@@ -244,7 +244,7 @@ def baseline_item(b, cfg, have=None):
         detail += " Prompts are processed staging-free (small card)."
     for m in b["measured"][:1]:
         detail += (f" Measured: {m['decode']} tok/s generation, {m['prefill']:,} tok/s prompt processing "
-                   f"({m['gpu']}).")
+                   f"({sizing.measured_on(m)}).")
     if b.get("experimental"):
         detail += " Below 12 GB this is experimental."
     settings = {k: v for k, v in b["settings"].items() if cfg.get(k) != v}

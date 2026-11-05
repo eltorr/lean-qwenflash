@@ -183,6 +183,8 @@ The rest builds up in layers, each depending on the one before:
 
 ## Status
 
+The README's [Tested so far](README.md#tested-so-far) has the full picture with numbers. In short:
+
 - **Windows 11 + WSL2, RTX 5090:** in daily use. Both quants run at 256K context; the 4.05 bpw full profile holds
   every expert in VRAM + RAM.
 - **Native Linux:** the manager and dashboard were checked inside WSL, acting as a Linux host. So were setup status,

@@ -57,8 +57,8 @@ def sizing_rows(d):
         card = round(r["card_total_gb"] * 1e9 / 2**30) if uncapped else int(card_class(r["usable_gb"]).split()[0])
         display = h.get("display") if uncapped else card > 8 or r["usable_gb"] < 7.5
         ram = round(h["ram_total_gb"] * 1e9 / 2**30) if h.get("ram_total_gb") else None
-        gpu = (h.get("gpu") or "?").replace("NVIDIA GeForce ", "") + ("" if uncapped else ", capped")
-        extra = ("" if display is not False else "display=False, ") + \
+        gpu = (h.get("gpu") or "?").replace("NVIDIA GeForce ", "")
+        extra = ("" if uncapped else "capped=True, ") + ("" if display is not False else "display=False, ") + \
                 ("" if plan.get("staging", True) and not r.get("nostage") else "staging=False, ")
         print(f'    dict(card={card}, {extra}quant="{r["quant"]}", context={r["context"]}, '
               f'ram_cache_gib={r.get("ram_gib")}, decode={r["decode_tps_median"]:.1f}, '

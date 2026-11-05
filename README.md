@@ -37,7 +37,8 @@ commits that upstream can cherry-pick. It also covers what is personal to my set
 
 - **[lean-qwenflash](https://github.com/MaxDevv/lean-qwenflash) by MaxDevv** is the engine this fork is built on:
   direct-from-SSD expert offloading, the packed expert store, the OpenAI server, and the original benchmarks and
-  documentation. Upstream's README text is kept below, from *About the engine* on.
+  documentation. Upstream's README text is kept below, almost unchanged: *About the engine*, MaxDevv's measurements,
+  *How It Works*, the manual install, *Serving* and the *To Do* list.
 - Through upstream:
   - [ExLlamaV3](https://github.com/turboderp-org/exllamav3) by turboderp;
   - [glm53-flash-offload](https://github.com/sybil-solutions/glm53-flash-offload) by sybil-solutions;
@@ -46,6 +47,106 @@ commits that upstream can cherry-pick. It also covers what is personal to my set
   See [Lineage](#lineage).
 - **Licenses:** upstream has no top-level license file yet, so this fork doesn't add one. The bundled ExLlamaV3 and
   offload code keep their MIT licenses.
+
+---
+
+## Quick start
+
+As with the original, you clone the repo, but after that one script and a web page do the rest. You run the
+launcher and open the dashboard, and its **Setup** tab finishes the install. It:
+
+- detects the OS (Windows or Linux), the GPU, RAM and drive;
+- picks a preset for the machine;
+- runs each install step, showing its output.
+
+### 1. What you need
+
+- **OS:**
+  - Windows 10/11. The engine runs in WSL2, which setup installs.
+  - Or Linux x86_64. The build step automates Ubuntu and Debian; on other distros it lists what to install.
+- **GPU:** NVIDIA, Turing (RTX 20) or newer, with 12 GB+ VRAM and a current driver. An 8 GB card works at 16K
+  context if it drives no monitor.
+- **RAM:** at least 32 GB on Windows or 16 GB on Linux; 64 GB holds the whole model.
+- **Disk:** a fast NVMe SSD with about 135 GB free for the 3.05 bpw model, or about 170 GB for 4.05.
+- **Software:**
+  - Windows: [Git](https://git-scm.com/download/win) and [Python 3](https://www.python.org/downloads/). Tick
+    *Add python.exe to PATH* when installing Python.
+  - Linux: `sudo apt install git python3-venv`.
+
+### 2. Get it and run the launcher
+
+**Windows** (PowerShell), or double-click `QwenFlash.cmd` in Explorer instead of the last line:
+
+```powershell
+git clone https://github.com/eltorr/lean-qwenflash.git
+cd lean-qwenflash
+.\QwenFlash.cmd
+```
+
+**Linux:**
+
+```bash
+git clone https://github.com/eltorr/lean-qwenflash.git
+cd lean-qwenflash
+./qwenflash.sh open
+```
+
+The launcher:
+
+1. creates a small Python environment for the manager (`psutil`, plus `pywin32` on Windows);
+2. starts the manager in the background;
+3. opens the dashboard at **http://127.0.0.1:30000/_switcher/**.
+
+On a Linux server without a desktop, it prints that address instead. Reach it from your PC with
+`ssh -L 30000:127.0.0.1:30000 you@server`. The dashboard only listens on the machine itself.
+
+### 3. Finish setup in the dashboard
+
+Open the **Setup** tab. It shows what it detected (platform, GPU, CPU and RAM, plus WSL on Windows, and the engine)
+and recommends settings for this machine. The first recommendation is the [preset](#presets-a-baseline-from-vram-and-ram);
+click **Apply baseline** if it offers one. Then run the steps from top to bottom. Each step can be run again safely.
+
+![Setup tab on Windows: detected hardware, the preset for this machine, and the setup steps](docs/images/dashboard-setup.png)
+
+| Step | Windows | Linux | What it does |
+|---|:---:|:---:|---|
+| WSL 2 | ✓ | | Installs WSL. Windows asks for administrator approval, and a first install usually needs a restart; run `QwenFlash.cmd` again afterwards |
+| WSL memory limit | ✓ | | Lets WSL use most of the RAM for the expert cache (`.wslconfig`) |
+| Ubuntu 24.04 | ✓ | | Installs the distro on the drive you pick; use your fastest NVMe |
+| NVIDIA driver | | ✓ | Checks the driver. If it's missing, it shows the install commands, since a driver install needs a reboot |
+| Build tools + CUDA 12.8 | ✓ | ✓ | Compiler, Python headers and the CUDA toolkit. Needs sudo on Linux; if the dashboard can't ask for the password, it shows the command to run in a terminal |
+| Engine + Python environment | ✓ | ✓ | The engine's Python environment with PyTorch (CUDA 12.8) |
+| Compile GPU kernels | ✓ | ✓ | Builds the kernels for your GPU |
+| Model: 3.05 or 4.05 bpw | ✓ | ✓ | Downloads the model and packs its expert store: about 85 + 47 GB for 3.05, or 107 + 62 GB for 4.05. Downloads resume after an interruption. The preset says which quant suits the machine |
+
+On Linux, the same tab lists the Linux steps:
+
+![Setup steps on Linux: driver and build tools done, the engine, kernels and models still to run](docs/images/setup-linux-steps.png)
+
+You can also run setup from a terminal. `./qwenflash.sh setup` lists the steps, and `./qwenflash.sh setup STEP` runs
+one, with STEP one of `wsl`, `wslconfig`, `distro`, `driver`, `base`, `engine`, `build`, `m305` or `m405`. On
+Windows, use `.venv\Scripts\python -m qwenflash setup STEP`.
+
+### 4. Use it
+
+The model starts on the first request, or when you click **Start full** in the dashboard. Starting takes a minute or
+so. Point any OpenAI-compatible client (Pi, OpenCode, Claude Code, ...) at:
+
+- **Base URL:** `http://127.0.0.1:30000/v1`
+- **Model:** `qwen3.8-flash-next`
+- **API key:** any non-empty string
+- **Context window:** `262144`, or the context the preset picked
+
+```bash
+curl http://127.0.0.1:30000/v1/chat/completions -H "Content-Type: application/json" \
+  -d '{"model": "qwen3.8-flash-next", "messages": [{"role": "user", "content": "Hello!"}]}'
+```
+
+Two optional extras, both covered in the [manager guide](docs/manager.md): start the service when you sign in
+(**Settings**), and serve other devices through the Ollama-style port 11434.
+
+Guides: [manager](docs/manager.md) · [API](docs/api.md) · [VRAM scaling results](research/vram-scaling/REPORT.md) ·
+[multi-GPU notes](docs/research/multi-gpu.md).
 
 ---
 
@@ -67,43 +168,40 @@ Built on [ExLlamaV3](https://github.com/turboderp-org/exllamav3) and adapted fro
 
 ---
 
-## Using this fork
+## Presets: a baseline from VRAM and RAM
 
-| | Windows 10/11 | Linux |
-|---|---|---|
-| Get it | `git clone https://github.com/eltorr/lean-qwenflash.git` (needs Git and Python 3) | same (needs Python 3) |
-| Start | double-click `QwenFlash.cmd` | `./qwenflash.sh open` |
-| Then | Setup tab: run the steps top to bottom | Setup tab, or `./qwenflash.sh setup STEP` in a terminal |
-| Clients | `http://127.0.0.1:30000/v1`, model `qwen3.8-flash-next` | same |
+The manager starts from a preset for the card, the RAM and the platform. A preset sets:
 
-The Setup tab shows what it detected, this machine's preset, and each setup step:
+- the quant;
+- the context window;
+- the RAM cache;
+- the manager's own RAM thresholds.
 
-![Setup tab: detected hardware, the preset for this machine, and the setup steps](docs/images/dashboard-setup.png)
+A new install applies it. Later, the dashboard offers it as a recommendation when your settings differ.
+`./qwenflash.sh plan` shows your machine's preset; `python3 sizing.py baseline --vram-gb 24 --ram-gb 128` shows any
+machine's.
 
-Guides: [manager](docs/manager.md) · [API](docs/api.md) · [VRAM scaling results](research/vram-scaling/REPORT.md) ·
-[multi-GPU notes](docs/research/multi-gpu.md).
+The table is for Linux, with the card also driving the desktop (except where the 8 GB rows say otherwise). Each
+cell gives:
 
-### Presets: a baseline from VRAM and RAM
-
-The manager starts from a preset for the card, the RAM and the platform: quant, context window, RAM cache, and its
-own RAM thresholds. A new install applies it. Later, the dashboard offers it as a recommendation when your settings
-differ. `./qwenflash.sh plan` shows your machine's preset; `python3 sizing.py baseline --vram-gb 24 --ram-gb 128`
-shows any machine's.
-
-Linux, with the card also driving the desktop (except where the 8 GB rows say otherwise). Each cell: quant ·
-context, then the RAM cache and how much of the model it keeps in memory (VRAM + RAM). *Italics:* measured
-generation speed of that configuration (chart below).
+1. quant · context;
+2. the RAM cache, and how much of the model it keeps in memory (VRAM + RAM);
+3. whether that configuration has been tested:
+   - ✅ **tested:** that exact configuration was measured (card size, quant, context, prefill mode, and a RAM
+     cache holding as much of the model). The cell gives the generation speed and the hardware. "64 GB RAM" in a
+     128 GB column means the run had 64 GB, with the same configuration, since every expert was already in memory.
+   - ⚪ **not tested:** computed by [`sizing.py`](sizing.py) only.
 
 <!-- presets:begin -->
 | Card (VRAM) | 16 GB RAM | 32 GB RAM | 64 GB RAM | 128 GB RAM |
 |---|---|---|---|---|
-| **8 GB, no display** | **3.05** · 16K, no staging<br>4 GiB RAM cache, 10% in memory | **3.05** · 16K, no staging<br>15 GiB RAM cache, 36% in memory | **3.05** · 16K, no staging<br>42 GiB RAM cache, all in memory<br>*20.2 tok/s* | **3.05** · 16K, no staging<br>42 GiB RAM cache, all in memory<br>*20.2 tok/s* |
+| **8 GB, no display** | **3.05** · 16K, no staging<br>4 GiB RAM cache, 10% in memory<br>⚪ not tested | **3.05** · 16K, no staging<br>15 GiB RAM cache, 36% in memory<br>⚪ not tested | **3.05** · 16K, no staging<br>42 GiB RAM cache, all in memory<br>✅ *20.2 tok/s* · RTX 5090 capped to 8 GB | **3.05** · 16K, no staging<br>42 GiB RAM cache, all in memory<br>✅ *20.2 tok/s* · RTX 5090 capped to 8 GB, 64 GB RAM |
 | **8 GB, with display** | not enough VRAM | not enough VRAM | not enough VRAM | not enough VRAM |
-| **12 GB** | **3.05** · 64K, no staging<br>4 GiB RAM cache, 15% in memory | **3.05** · 64K, no staging<br>15 GiB RAM cache, 41% in memory | **3.05** · 64K, no staging<br>40 GiB RAM cache, all in memory | **3.05** · 64K, no staging<br>40 GiB RAM cache, all in memory |
-| **16 GB** | **3.05** · 256K<br>4 GiB RAM cache, 18% in memory | **3.05** · 256K<br>15 GiB RAM cache, 44% in memory | **3.05** · 256K<br>39 GiB RAM cache, all in memory<br>*37.8 tok/s* | **3.05** · 256K<br>39 GiB RAM cache, all in memory<br>*37.8 tok/s* |
-| **24 GB** | **3.05** · 256K<br>4 GiB RAM cache, 34% in memory | **3.05** · 256K<br>15 GiB RAM cache, 60% in memory | **4.05** · 256K<br>45 GiB RAM cache, all in memory<br>*42.6 tok/s* | **4.05** · 256K<br>47 GiB RAM cache, all in memory<br>*42.6 tok/s* |
-| **32 GB** | **3.05** · 256K<br>4 GiB RAM cache, 51% in memory | **3.05** · 256K<br>15 GiB RAM cache, 77% in memory | **4.05** · 256K<br>40 GiB RAM cache, all in memory<br>*56.1 tok/s* | **4.05** · 256K<br>40 GiB RAM cache, all in memory<br>*56.1 tok/s* |
-| **48 GB** | **3.05** · 256K<br>4 GiB RAM cache, 89% in memory | **3.05** · 256K<br>9 GiB RAM cache, all in memory | **4.05** · 256K<br>24 GiB RAM cache, all in memory | **4.05** · 256K<br>24 GiB RAM cache, all in memory |
+| **12 GB** | **3.05** · 64K, no staging<br>4 GiB RAM cache, 15% in memory<br>⚪ not tested | **3.05** · 64K, no staging<br>15 GiB RAM cache, 41% in memory<br>⚪ not tested | **3.05** · 64K, no staging<br>40 GiB RAM cache, all in memory<br>⚪ not tested | **3.05** · 64K, no staging<br>40 GiB RAM cache, all in memory<br>⚪ not tested |
+| **16 GB** | **3.05** · 256K<br>4 GiB RAM cache, 18% in memory<br>⚪ not tested | **3.05** · 256K<br>15 GiB RAM cache, 44% in memory<br>⚪ not tested | **3.05** · 256K<br>39 GiB RAM cache, all in memory<br>✅ *37.8 tok/s* · RTX 5090 capped to 16 GB | **3.05** · 256K<br>39 GiB RAM cache, all in memory<br>✅ *37.8 tok/s* · RTX 5090 capped to 16 GB, 64 GB RAM |
+| **24 GB** | **3.05** · 256K<br>4 GiB RAM cache, 34% in memory<br>⚪ not tested | **3.05** · 256K<br>15 GiB RAM cache, 60% in memory<br>⚪ not tested | **4.05** · 256K<br>45 GiB RAM cache, all in memory<br>✅ *42.6 tok/s* · RTX 5090 capped to 24 GB | **4.05** · 256K<br>47 GiB RAM cache, all in memory<br>✅ *42.6 tok/s* · RTX 5090 capped to 24 GB, 64 GB RAM |
+| **32 GB** | **3.05** · 256K<br>4 GiB RAM cache, 51% in memory<br>⚪ not tested | **3.05** · 256K<br>15 GiB RAM cache, 77% in memory<br>⚪ not tested | **4.05** · 256K<br>40 GiB RAM cache, all in memory<br>✅ *51.0 tok/s* · RTX 5090 | **4.05** · 256K<br>40 GiB RAM cache, all in memory<br>✅ *51.0 tok/s* · RTX 5090, 64 GB RAM |
+| **48 GB** | **3.05** · 256K<br>4 GiB RAM cache, 89% in memory<br>⚪ not tested | **3.05** · 256K<br>9 GiB RAM cache, all in memory<br>⚪ not tested | **4.05** · 256K<br>24 GiB RAM cache, all in memory<br>⚪ not tested | **4.05** · 256K<br>24 GiB RAM cache, all in memory<br>⚪ not tested |
 <!-- presets:end -->
 
 - **Quant:** 4.05 bpw (higher fidelity) where it keeps 256K context, full-speed prompt processing and nearly every
@@ -117,32 +215,56 @@ generation speed of that configuration (chart below).
 - **Windows** keeps about 8 GB more for itself and WSL: 16 GB of RAM is too little there, and 32-64 GB machines get
   smaller RAM caches (`python3 sizing.py presets --platform windows-wsl`).
 
-**Measured.** An RTX 5090 (WSL2, 64 GB RAM) capped to each card's VRAM
-([method and full results](research/vram-scaling/REPORT.md)). The caps emulate VRAM capacity only: real smaller
-cards also have less bandwidth and slower PCIe, so expect less. Not measured yet: more RAM with less VRAM (128 GB
-with a 24 GB card or smaller), less RAM (16-32 GB), and real 8-24 GB cards. New results go into `sizing.MEASURED`;
-`python3 sizing.py presets --write README.md` regenerates both tables.
-
-<!-- measured:begin -->
-| Card (VRAM) | Quant | Context | RAM cache | Prefill | Decode | Measured on |
-|---|---|---|---|---|---|---|
-| **32 GB** | 3.05 | 256K | 25 GiB | 5,754 tok/s | 64.0 tok/s | RTX 5090, capped (64 GB RAM) |
-| **24 GB** | 3.05 | 256K | 32 GiB | 5,896 tok/s | 51.5 tok/s | RTX 5090, capped (64 GB RAM) |
-| **16 GB** | 3.05 | 256K | 38 GiB | 4,338 tok/s | 37.8 tok/s | RTX 5090, capped (64 GB RAM) |
-| **12 GB** | 3.05 | 64K | 38 GiB | 1,816 tok/s | 33.2 tok/s | RTX 5090, capped (64 GB RAM) |
-| **12 GB** | 3.05 | 128K, no staging | 38 GiB | 1,564 tok/s | 29.9 tok/s | RTX 5090, capped (64 GB RAM) |
-| **8 GB, no display** | 3.05 | 16K, no staging | 38 GiB | 1,166 tok/s | 20.2 tok/s | RTX 5090, capped (64 GB RAM) |
-| **32 GB** | 4.05 | 256K | 38 GiB | 5,293 tok/s | 56.1 tok/s | RTX 5090, capped (64 GB RAM) |
-| **24 GB** | 4.05 | 256K | 38 GiB | 5,006 tok/s | 42.6 tok/s | RTX 5090, capped (64 GB RAM) |
-| **16 GB** | 4.05 | 256K | 38 GiB | 1,384 tok/s | 30.3 tok/s | RTX 5090, capped (64 GB RAM) |
-| **12 GB** | 4.05 | 32K, no staging | 38 GiB | 431 tok/s | 26.6 tok/s | RTX 5090, capped (64 GB RAM) |
-<!-- measured:end -->
-
 ---
 
-## Measured Performance
+## Tested so far
 
-Benchmarked using `turboderp/Qwen3.8-Flash-Next-exl3` (`3.05bpw_h5_ng5`) with 4-bit KV cache unless noted:
+### Platforms and features
+
+| | Status | Notes |
+|---|---|---|
+| Windows 11 + WSL2, RTX 5090, 64 GB RAM | ✅ In daily use | Both quants at 256K context. Manager, dashboard, setup steps, auto-switch and the Ollama front door |
+| Native Linux | 🟡 Partly | Checked inside WSL acting as a Linux host: the manager, dashboard, setup status, first-run preset, and the `systemd --user` backend as a normal user. No model has been started on a bare-metal Linux box yet |
+| Setup on a clean machine | ⚪ Not yet | The steps have run on this PC. A clean Windows or Linux install hasn't been tried |
+| Real 8-24 GB cards | ⚪ Not yet | The numbers below come from the RTX 5090 capped to each card size |
+| Turing (RTX 20) cards | ⚪ Not yet | |
+| 16-32 GB or 128 GB of RAM | ⚪ Not yet | The presets are computed. Next up: 128 GB with a 24 GB card or smaller |
+| Two GPUs | ❌ Not supported | See the [notes](docs/research/multi-gpu.md) |
+| The original's results (RTX 4090, RTX 3080 Laptop) | ✅ By MaxDevv | [Below](#original-measured-by-maxdevv), unchanged |
+
+### This fork: RTX 5090
+
+All on the machine this fork was built on: an RTX 5090 (PCIe 5.0), a Ryzen 9 9950X and 64 GB of RAM, on Windows 11
++ WSL2.
+
+- **Full-card rows** use the whole card.
+- **Capped rows** hold the engine to a smaller card's VRAM. That only emulates capacity: real smaller cards also have
+  less bandwidth and slower PCIe, so expect less from them.
+- **Compare within one report:** the two reports measure decode a little differently.
+- **Adding results:** new results go into `sizing.MEASURED`, and `python3 sizing.py presets --write README.md`
+  regenerates this table and the preset matrix.
+
+<!-- measured:begin -->
+| Card (VRAM) | Quant | Context | RAM cache | Prefill | Decode | Measured on | Details |
+|---|---|---|---|---|---|---|---|
+| **32 GB** | 3.05 | 256K | 26 GiB | 6,407 tok/s | 60.8 tok/s | RTX 5090, 64 GB RAM, Windows (WSL2) | [report](research/rtx5090-wsl/REPORT.md) |
+| **32 GB** | 3.05 | 256K | 25 GiB | 5,754 tok/s | 64.0 tok/s | RTX 5090 capped to 32 GB, 64 GB RAM, Windows (WSL2) | [report](research/vram-scaling/REPORT.md) |
+| **24 GB** | 3.05 | 256K | 32 GiB | 5,896 tok/s | 51.5 tok/s | RTX 5090 capped to 24 GB, 64 GB RAM, Windows (WSL2) | [report](research/vram-scaling/REPORT.md) |
+| **16 GB** | 3.05 | 256K | 38 GiB | 4,338 tok/s | 37.8 tok/s | RTX 5090 capped to 16 GB, 64 GB RAM, Windows (WSL2) | [report](research/vram-scaling/REPORT.md) |
+| **12 GB** | 3.05 | 64K | 38 GiB | 1,816 tok/s | 33.2 tok/s | RTX 5090 capped to 12 GB, 64 GB RAM, Windows (WSL2) | [report](research/vram-scaling/REPORT.md) |
+| **12 GB** | 3.05 | 128K, no staging | 38 GiB | 1,564 tok/s | 29.9 tok/s | RTX 5090 capped to 12 GB, 64 GB RAM, Windows (WSL2) | [report](research/vram-scaling/REPORT.md) |
+| **8 GB, no display** | 3.05 | 16K, no staging | 38 GiB | 1,166 tok/s | 20.2 tok/s | RTX 5090 capped to 8 GB, 64 GB RAM, Windows (WSL2) | [report](research/vram-scaling/REPORT.md) |
+| **32 GB** | 4.05 | 256K | 34 GiB | 5,732 tok/s | 56.3 tok/s | RTX 5090, 64 GB RAM, Windows (WSL2) | [report](research/rtx5090-wsl/REPORT.md) |
+| **32 GB** | 4.05 | 256K | 40 GiB | 6,326 tok/s | 51.0 tok/s | RTX 5090, 64 GB RAM, Windows (WSL2) | [report](research/rtx5090-wsl/REPORT.md) |
+| **32 GB** | 4.05 | 256K | 38 GiB | 5,293 tok/s | 56.1 tok/s | RTX 5090 capped to 32 GB, 64 GB RAM, Windows (WSL2) | [report](research/vram-scaling/REPORT.md) |
+| **24 GB** | 4.05 | 256K | 38 GiB | 5,006 tok/s | 42.6 tok/s | RTX 5090 capped to 24 GB, 64 GB RAM, Windows (WSL2) | [report](research/vram-scaling/REPORT.md) |
+| **16 GB** | 4.05 | 256K | 38 GiB | 1,384 tok/s | 30.3 tok/s | RTX 5090 capped to 16 GB, 64 GB RAM, Windows (WSL2) | [report](research/vram-scaling/REPORT.md) |
+| **12 GB** | 4.05 | 32K, no staging | 38 GiB | 431 tok/s | 26.6 tok/s | RTX 5090 capped to 12 GB, 64 GB RAM, Windows (WSL2) | [report](research/vram-scaling/REPORT.md) |
+<!-- measured:end -->
+
+### Original: measured by MaxDevv
+
+From the original README, unchanged. Benchmarked using `turboderp/Qwen3.8-Flash-Next-exl3` (`3.05bpw_h5_ng5`) with 4-bit KV cache unless noted:
 
 | Hardware | Context | System RAM Used | VRAM Used | Prefill | Decode |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -152,9 +274,6 @@ Benchmarked using `turboderp/Qwen3.8-Flash-Next-exl3` (`3.05bpw_h5_ng5`) with 4-
 | **RTX 3080 Laptop (16GB)** | 100k (8 GB cache) | 19.0 GB | 15.5 GB | 647 tok/s | 17.6 tok/s |
 | **RTX 3080 Laptop (16GB)** | 100k (16 GB cache) | 23.9 GB | 15.5 GB | 693 tok/s | 20.9 tok/s |
 | **RTX 4090** | 17 tokens (4 GB cache, unquantized KV) | 8.55 GB | 14.90 GB | — | 16.0 tok/s (code) |
-
-This fork's measurements on 8-32 GB cards, and the preset for each card and amount of RAM, are under
-[Presets](#presets-a-baseline-from-vram-and-ram).
 
 ---
 
@@ -170,7 +289,9 @@ Qwen3.8-Flash-Next activates only 10 of its 512 experts per layer per token (~2%
 
 ---
 
-## Quickstart
+## Manual install (the original instructions)
+
+Without the manager, as in the original README. The [Quick start](#quick-start) above does all of this for you.
 
 ### 1. Requirements
 * Linux (x86_64), or Windows 10/11 with the engine in WSL2 (the [manager](docs/manager.md) sets that up)
@@ -181,8 +302,7 @@ Qwen3.8-Flash-Next activates only 10 of its 512 experts per layer per token (~2%
 * Fast NVMe SSD (PCIe 3.0 or 4.0, ~3+ GB/s read throughput)
 * CUDA 12.4+ (12.8 for RTX 50 cards) and Python 3.10–3.12
 
-With the manager, `qwenflash setup` (or the dashboard's Setup tab) runs the steps below for you and sizes everything
-for your card. `./run.sh server` starts the server sized from the hardware, without the manager.
+`./run.sh server` starts the server sized from the hardware, without the manager.
 
 ### 2. Install
 

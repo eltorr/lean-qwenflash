@@ -279,17 +279,24 @@ def measured_for(b):
     def same_ram(m):
         r, mr = b["ram_cache_gib"], m["ram_cache_gib"]
         return 0.8 * r <= mr <= 1.25 * r or (b["in_memory"] >= 0.97 and mr >= 0.8 * r)
-    return [m for m in MEASURED if m["card"] == round(b["vram_total"] / GIB)
-            and (m.get("display", True) == b["display"] or m["card"] > 8)      # a display only matters on 8 GB
-            and m["quant"] == b["quant"] and m["context"] == b["context"] and m.get("staging", True) == b["staging"]
-            and same_ram(m)]
+    found = [m for m in MEASURED if m["card"] == round(b["vram_total"] / GIB)
+             and (m.get("display", True) == b["display"] or m["card"] > 8)      # a display only matters on 8 GB
+             and m["quant"] == b["quant"] and m["context"] == b["context"] and m.get("staging", True) == b["staging"]
+             and same_ram(m)]
+    # a real card of that size first, then the closest RAM cache
+    return sorted(found, key=lambda m: (m.get("capped", False), abs(m["ram_cache_gib"] - b["ram_cache_gib"])))
 
 
 # Measurements behind the presets. card: VRAM class in GiB; ram: the machine's RAM in GiB; ram_cache_gib: the RAM
-# cache the run had. Add rows as real cards and other RAM sizes are measured (bench/vram_matrix.py, then
-# `bench/vram_table.py --sizing` prints rows in this format).
-_R5090 = {"ram": 64, "platform": "windows-wsl", "gpu": "RTX 5090, capped", "source": "research/vram-scaling"}
+# cache the run had; capped: the engine was held to that card size on a bigger card (VRAM capacity only: a real card
+# of that size has less bandwidth). Add rows as real cards and other RAM sizes are measured (bench/vram_matrix.py,
+# then `bench/vram_table.py --sizing` prints rows in this format).
+_R5090_FULL = {"ram": 64, "platform": "windows-wsl", "gpu": "RTX 5090", "source": "research/rtx5090-wsl"}
+_R5090 = {"ram": 64, "platform": "windows-wsl", "gpu": "RTX 5090", "capped": True, "source": "research/vram-scaling"}
 MEASURED = [
+    dict(_R5090_FULL, card=32, quant="3.05", context=262144, ram_cache_gib=26, decode=60.8, prefill=6407),
+    dict(_R5090_FULL, card=32, quant="4.05", context=262144, ram_cache_gib=34, decode=56.3, prefill=5732),
+    dict(_R5090_FULL, card=32, quant="4.05", context=262144, ram_cache_gib=40, decode=51.0, prefill=6326),
     dict(_R5090, card=32, quant="3.05", context=262144, ram_cache_gib=25, decode=64.0, prefill=5754),
     dict(_R5090, card=24, quant="3.05", context=262144, ram_cache_gib=32, decode=51.5, prefill=5896),
     dict(_R5090, card=16, quant="3.05", context=262144, ram_cache_gib=38, decode=37.8, prefill=4338),
@@ -326,6 +333,19 @@ def _card_name(gib, display):
     return f"{gib} GB, {'with' if display else 'no'} display"
 
 
+def measured_on(m):
+    return f"{m['gpu']}" + (f" capped to {m['card']} GB" if m.get("capped") else "")
+
+
+def _tested(found, ram):
+    """A preset's test status for the matrix: the measured speed and where, or not tested."""
+    if not found:
+        return "⚪ not tested"
+    m = found[0]
+    return (f"✅ *{m['decode']} tok/s* · {measured_on(m)}"
+            + ("" if m["ram"] == ram else f", {m['ram']} GB RAM"))
+
+
 def presets_table(platform="linux"):
     """The README's preset matrix (between <!-- presets:begin/end -->), generated from baseline() and MEASURED."""
     lines = ["| Card (VRAM) | " + " | ".join(f"{r} GB RAM" for r in PRESET_RAM) + " |",
@@ -339,21 +359,23 @@ def presets_table(platform="linux"):
                 continue
             mem = "all in memory" if b["in_memory"] >= 0.97 else f"{b['in_memory']:.0%} in memory"
             stage = "" if b["staging"] else ", no staging"
-            meas = "".join(f"<br>*{m['decode']} tok/s*" for m in b["measured"][:1])
             cells.append(f"**{b['quant']}** · {_ctx(b['context'])}{stage}<br>{b['ram_cache_gib']} GiB RAM cache, "
-                         f"{mem}{meas}")
+                         f"{mem}<br>{_tested(b['measured'], ram)}")
         lines.append(f"| **{_card_name(gib, display)}** | " + " | ".join(cells) + " |")
     return "\n".join(lines)
 
 
 def measured_table():
     """The README's measurement chart (between <!-- measured:begin/end -->), from MEASURED."""
-    lines = ["| Card (VRAM) | Quant | Context | RAM cache | Prefill | Decode | Measured on |", "|---" * 7 + "|"]
-    for m in sorted(MEASURED, key=lambda m: (m["quant"], -m["card"], m["context"])):
+    lines = ["| Card (VRAM) | Quant | Context | RAM cache | Prefill | Decode | Measured on | Details |",
+             "|---" * 8 + "|"]
+    for m in sorted(MEASURED, key=lambda m: (m["quant"], -m["card"], m.get("capped", False), m["context"],
+                                             m["ram_cache_gib"])):
         ctx = _ctx(m["context"]) + ("" if m.get("staging", True) else ", no staging")
         lines.append(f"| **{_card_name(m['card'], m.get('display', True))}** | {m['quant']} | {ctx} | "
                      f"{m['ram_cache_gib']} GiB | {m['prefill']:,} tok/s | {m['decode']} tok/s | "
-                     f"{m['gpu']} ({m['ram']} GB RAM) |")
+                     f"{measured_on(m)}, {m['ram']} GB RAM, {PLATFORMS[m['platform']]} | "
+                     f"[report]({m['source']}/REPORT.md) |")
     return "\n".join(lines)
 
 
@@ -380,7 +402,7 @@ def describe(b):
          f"{'' if b['staging'] else ' (no staging)'}, {b['slots']:,} experts in VRAM, {b['ram_cache_gib']} GiB RAM "
          f"cache: {b['in_memory']:.0%} of experts in memory")
     for m in b["measured"]:
-        s += (f"\n  measured: {m['decode']} tok/s decode, {m['prefill']:,} tok/s prefill ({m['gpu']}, "
+        s += (f"\n  measured: {m['decode']} tok/s decode, {m['prefill']:,} tok/s prefill ({measured_on(m)}, "
               f"{m['ram']} GB RAM)")
     if b.get("alternative"):
         a = b["alternative"]
@@ -409,6 +431,8 @@ def main(argv=None):
     s.add_argument("--platform", default="linux", choices=sorted(PLATFORMS))
     s.add_argument("--write", metavar="README", help="update the tables in this file instead of printing them")
     a = ap.parse_args(argv)
+    if (sys.stdout.encoding or "").lower().replace("-", "") != "utf8":
+        sys.stdout.reconfigure(encoding="utf-8")   # the tables use ✅ / ⚪; a Windows pipe defaults to cp1252
     if a.cmd == "presets":
         if a.write:
             update_readme(a.write)
