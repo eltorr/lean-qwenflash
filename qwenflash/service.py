@@ -21,6 +21,7 @@ import re
 import secrets
 import socket
 import statistics
+import subprocess
 import sys
 import threading
 import time
@@ -430,7 +431,23 @@ class Service:
             return
         was = self.be.tier
         self.be.set("stopping")
-        await asyncio.to_thread(self.host.backend_stop)
+        # Check that it's gone: under severe memory pressure the stop command itself can fail, and a server still
+        # holding the GPU and RAM must not be taken for stopped.
+        out, st = "", "unknown"
+        for attempt in range(3):
+            try:
+                out = await asyncio.to_thread(self.host.backend_stop)
+                st, _ = await asyncio.to_thread(self.host.backend_status)
+            except (OSError, subprocess.SubprocessError) as e:
+                out, st = str(e), "unknown"
+            if st not in ("running", "stray", "unknown"):
+                break
+            log.warning("model server %s after a stop (%s); retrying", st, str(out)[:200])
+            await asyncio.sleep(5 * (attempt + 1))
+        else:
+            self.be.set("running")                  # still there: keep tracking it, and the next tick tries again
+            self.event("error", f"could not stop the model server ({str(out)[:160] or st}); will try again")
+            return
         await asyncio.to_thread(self.host.after_stop)
         try:
             (config.STATE / "backend.json").unlink()

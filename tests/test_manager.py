@@ -54,3 +54,44 @@ class ConfigTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StopTests(unittest.TestCase):
+    """A stop counts only once the model server is gone (under memory pressure the stop command can fail)."""
+
+    def run_stop(self, statuses):
+        import asyncio
+        import types
+        from qwenflash import service
+        calls = {"stop": 0}
+        host = types.SimpleNamespace(after_stop=lambda: None)
+        def backend_stop():
+            calls["stop"] += 1
+            if calls["stop"] == 1:
+                raise OSError("wsl.exe: insufficient resources")
+            return "stopped"
+        host.backend_stop = backend_stop
+        host.backend_status = lambda: (statuses.pop(0), None)
+        events = []
+        be = service.Backend()
+        be.set("running")
+        be.pid, be.tier = 123, "full"
+        svc = types.SimpleNamespace(observe=False, be=be, host=host, event=lambda k, m: events.append((k, m)),
+                                    ext_at_start=None, perproc_at_start=None)
+        real_sleep = asyncio.sleep
+        service.asyncio.sleep = lambda s: real_sleep(0)
+        try:
+            asyncio.run(service.Service._stop_locked(svc, "test"))
+        finally:
+            service.asyncio.sleep = real_sleep
+        return be.state, events, calls["stop"]
+
+    def test_a_failed_stop_is_retried(self):
+        state, events, stops = self.run_stop(["stopped"])     # the first stop raises; the second works
+        self.assertEqual(state, "stopped")
+        self.assertEqual(stops, 2)
+
+    def test_a_server_that_stays_is_still_tracked(self):
+        state, events, stops = self.run_stop(["running", "running", "running"])
+        self.assertEqual(state, "running")
+        self.assertEqual(events[-1][0], "error")
