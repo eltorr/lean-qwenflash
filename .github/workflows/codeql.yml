@@ -33,19 +33,13 @@ jobs:
           languages: ${{ matrix.language }}
           build-mode: none
           queries: security-extended
+          # everything this repo runs, apart from the bundled ExLlamaV3 (the Python extractor takes folders, not files)
           config: |
-            paths:
-              - qwenflash
-              - sizing.py
-              - download_http.py
-              - qwen_server.py
-              - bin
-              - bench
-              - qwen38-flash-offload/qwen38/serve.py
-              - qwen38-flash-offload/qwen38/openai_compat.py
-              - qwen38-flash-offload/qwen38/openai_responses.py
-              - qwen38-flash-offload/qwen38/wsl_pinned.py
-              - .github/workflows
+            paths-ignore:
+              - exllamav3
+              - research
+              - docs
+              - media
       - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
         with:
           category: /language:${{ matrix.language }}
