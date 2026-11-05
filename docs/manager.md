@@ -41,8 +41,8 @@ On Windows, run these as `.venv\Scripts\python -m qwenflash ...`; on Linux, as `
 | WSL 2 | installs WSL; needs administrator approval, and a first install needs a restart | - |
 | WSL memory limit | lets WSL use most of the RAM (`.wslconfig`) | - |
 | Ubuntu 24.04 | installs the distro on the drive you pick, with systemd | - |
-| NVIDIA driver | - | checks it, and shows the install commands if it's missing |
-| Build tools + CUDA 13.2 | inside WSL | uses `sudo`, or prints the command to run |
+| NVIDIA driver | - | checks for driver 595 or newer (CUDA 13.2), and otherwise shows the install commands |
+| Build tools + CUDA 13.2 | inside WSL | Ubuntu 22.04+ or Debian 12+; uses `sudo`, or prints the command to run |
 | Engine + Python environment | a clone of this checkout inside WSL, at the same commit | this checkout |
 | Compile GPU kernels | for the local GPU (Turing to Blackwell) | same |
 | Models | 3.05 bpw (~85 GB download + 47 GB store) or 4.05 bpw (~107 + 62 GB); downloads resume | same |
@@ -96,8 +96,28 @@ staging fits.
 | `sizing.py` | the VRAM and RAM model, shared by the manager and `run.sh` |
 | `run.sh` | starts the engine, sized from the hardware |
 | `bin/qwenflash-backend` | runs the engine detached (a systemd unit where available) |
-| `setup/` | the install steps, shared by both platforms |
+| `setup/` | the install steps, shared by both platforms; `CUDA_VER` and `DRIVER_MIN` in `lib.sh` |
+| `tools/` | the checks (`scan.sh`), the package locks (`lock.sh`) and the pre-push hook |
 | settings and logs | Windows `%LOCALAPPDATA%\QwenFlash`, Linux `~/.local/state/qwenflash` |
+
+## Security
+
+- **Dashboard:** every port needs the dashboard token, from the private link's cookie or a Bearer header. It's
+  `dashboard_token` in `config.json`.
+- **Other websites:** browser requests from other sites, and DNS rebinding, are refused
+  ([details](api.md#control-api-the-dashboards-not-openai)).
+- **Settings:** paths, programs, ports and the token change only in `config.json`. Other devices can't run setup,
+  quit, change autostart, make a new link or change the PC's name in it.
+- **Model server:** it listens on `127.0.0.1` and answers only requests that carry the manager's key (`backend.key`
+  in the settings folder).
+- **Files:** the settings folder is private to your user. On Windows, setup limits the WSL folder to you, SYSTEM and
+  Administrators.
+- **Packages and downloads:**
+  - every Python package is pinned by hash;
+  - NVIDIA's repository key is checked before it's trusted;
+  - model files are checked against Hugging Face's hashes.
+- **The API (`/v1`) takes no key,** like a local OpenAI server: anything that reaches the port can use the model.
+  Only expose the network port, on a private network such as a tailnet.
 
 ## Other machines
 

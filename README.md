@@ -24,13 +24,18 @@ Clone it and make it your own. Just keep the credit to MaxDevv, whose engine it'
 | **API** | OpenAI Chat Completions | Adds the OpenAI Responses API ([what's new](FORK.md#api-whats-original-and-whats-new)) |
 | **Monitoring** | Terminal output | A local web dashboard |
 | **Engine** | | A few fixes: pinned memory under WSL2, 4.05 bpw prefill, configurable VRAM limits, kernels built for the local GPU, OpenAI `reasoning_effort` values |
+| **Stack** | PyTorch 2.11, CUDA 12.8 | PyTorch 2.15, CUDA 13.2: prefill 47-72% faster, decode the same ([report](research/torch-2.15/REPORT.md)) |
+| **Security** | Listens on localhost | A sign-in token for the dashboard, other websites refused, a model server only the manager can call, packages pinned by hash, verified downloads |
+| **Checks** | | Lint, shellcheck, secret and CVE scans and unit tests, locally and on every push |
 
 [FORK.md](FORK.md) lists the changes, including the engine fixes upstream can cherry-pick.
+[CHANGELOG.md](CHANGELOG.md) lists them by date.
 
 ## Quick start
 
-**You need:** an NVIDIA GPU (RTX 20 or newer, 12 GB+), 32 GB of RAM (16 GB on Linux), a fast NVMe SSD with about
-170 GB free, and Git and Python 3. On Windows, tick *Add python.exe to PATH* when installing Python.
+**You need:** an NVIDIA GPU (RTX 20 or newer, 12 GB+) with driver 595 or newer, 32 GB of RAM (16 GB on Linux), a
+fast NVMe SSD with about 170 GB free, and Git and Python 3. On Windows, tick *Add python.exe to PATH* when installing
+Python. On Linux, setup automates Ubuntu 22.04+ and Debian 12+.
 
 **Windows:**
 
@@ -99,7 +104,8 @@ The figures are for Linux; Windows keeps about 8 GB more RAM for itself.
 ### This fork: RTX 5090
 
 "Capped" rows hold the engine to a smaller card's VRAM. Real smaller cards also have less bandwidth, so expect less
-from them.
+from them. These were measured on PyTorch 2.11 and CUDA 12.8; on 2.15 and 13.2, prefill is 47-72% faster at 8K-64K
+tokens and decode is the same ([report](research/torch-2.15/REPORT.md)).
 
 <!-- measured:begin -->
 | Card (VRAM) | Quant | Context | RAM cache | Prefill | Decode | Measured on |
@@ -156,16 +162,17 @@ Qwen3.8-Flash-Next activates only 10 of its 512 experts per layer per token (~2%
 <details>
 <summary><b>Manual install, without the manager</b> (the original instructions)</summary>
 
-Requires Linux or WSL2, an NVIDIA GPU (Turing or newer), a driver that supports CUDA 13.2 (`nvidia-smi` shows it), CUDA 13.2 and Python 3.10–3.12.
+Requires Linux or WSL2, an NVIDIA GPU (Turing or newer), driver 595 or newer (CUDA 13.2; `nvidia-smi` shows it), the
+CUDA 13.2 toolkit and Python 3.12, which the pinned packages are locked for.
 
 ```bash
 git clone https://github.com/eltorr/lean-qwenflash.git
 cd lean-qwenflash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install torch --index-url https://download.pytorch.org/whl/cu132
-pip install fastapi uvicorn safetensors jinja2 huggingface_hub
-pip install -e exllamav3
+pip install --require-hashes -r setup/requirements.txt \
+    --index-url https://download.pytorch.org/whl/cu132 --extra-index-url https://pypi.org/simple
+pip install --no-deps --no-build-isolation -e exllamav3
 python compile_local.py                              # native offload extensions
 
 python download_http.py --model-dir ./model         # 3.05bpw checkpoint + N-gram table, ~85 GB
@@ -175,7 +182,9 @@ python qwen38-flash-offload/scripts/pack_qwen38_store.py pack --model ./model --
 python qwen_server.py --model ./model --store ./store/qwen.bin --ram-gb 8 --cache 262144 --chunk 24576 --port 30000
 ```
 
-To size the server for your card automatically, run `./run.sh server` instead of the last line.
+To size the server for your card automatically, run `./run.sh server` instead of the last line. The server answers
+programs on this machine and refuses web pages. `--host 0.0.0.0` (or `HOST=0.0.0.0 ./run.sh server`) serves your
+network, with no sign-in, so keep that to a private network.
 
 </details>
 

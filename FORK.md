@@ -26,7 +26,17 @@ standalone commits that apply to the original too; see [Taking changes upstream]
   from the VRAM and RAM. The README's tables are generated from it.
 - **Benchmarks** ([`bench/`](bench), [`research/`](research)). VRAM scaling for 8-32 GB cards, on a 5090 capped to
   each size.
+- **Newer stack.** PyTorch 2.15 on CUDA 13.2, where the original installs PyTorch 2.11 on CUDA 12.8. Prefill is
+  47-72% faster ([report](research/torch-2.15/REPORT.md)); it needs NVIDIA driver 595 or newer.
+- **Security** ([manager guide](docs/manager.md#security)):
+  - the dashboard needs a sign-in token on every port;
+  - requests from other websites and DNS rebinding are refused;
+  - the model server only answers the manager;
+  - every package is pinned by hash, and model downloads are checked against Hugging Face's hashes.
+- **Checks** ([below](#checks)). Lint, shellcheck, secret and CVE scans and the unit tests, locally and on GitHub.
 - **Tests** ([`tests/`](tests)).
+
+[CHANGELOG.md](CHANGELOG.md) lists the changes by date.
 
 ## API: what's original and what's new
 
@@ -51,17 +61,20 @@ Details are in [docs/api.md](docs/api.md).
 
 ## Changes to upstream files
 
-Everything not listed here is new. Defaults are unchanged unless the new environment variables are set.
+Everything not listed here is new. Defaults are unchanged unless the new environment variables are set, except for
+two safety changes: the model server refuses web pages, and it never runs code from a model folder.
 
 | File (`qwen38/` is `qwen38-flash-offload/qwen38/`) | Change |
 |---|---|
 | `qwen38/nv2.py`, `nv_tier.py`, `k_lookahead.py`, `exl3_tiers.py` (+ `wsl_pinned.py`) | Pinned host memory works under WSL2 |
+| `qwen38/nv2.py`, `cpu_tier.py` | Built as C++20, which PyTorch 2.15's headers need |
 | `qwen38/expert_cache.py` | Prefill staging holds a whole layer, so 4.05 bpw fits |
-| `qwen38/serve.py` (+ `openai_compat.py`, `openai_responses.py`) | `reasoning_effort` mapping; the Responses API |
+| `qwen38/serve.py` (+ `openai_compat.py`, `openai_responses.py`) | `reasoning_effort` mapping; the Responses API; `trust_remote_code` off |
 | `qwen_offload.py` | Configurable VRAM limits; kernels built for the local GPU |
 | `memory_guard.py` | Configurable limit; no crash without a memory cgroup |
-| `qwen_server.py` | Prefill chunk from `QWEN_CHUNK` |
-| `download_http.py` | `--branch` and `--sha`, to fetch 4.05 bpw; both quants are pinned to one upload |
+| `qwen_server.py` | Prefill chunk from `QWEN_CHUNK`; refuses web pages, and on localhost other host names (DNS rebinding); takes the manager's key; no access log |
+| `download_http.py` | `--branch` and `--sha`, to fetch 4.05 bpw; both quants are pinned to one upload; every file is checked against its hash |
+| `qwen38-flash-offload/bench/sweep.py` | Sends the manager's key when it's set |
 | `.gitignore` (+ `.gitattributes`) | The fork's files; LF endings for scripts that run in Linux |
 | `README.md` | Rewritten for the fork; the original's intro, benchmarks and manual install are kept |
 
@@ -84,6 +97,9 @@ git remote add eltorr https://github.com/eltorr/lean-qwenflash.git
 git fetch eltorr
 git cherry-pick 59ca8ce e3ae7c2 f05f734 2f2401c 0f7740f 5e0167e ec034b9
 ```
+
+The security changes to upstream files and the C++20 build are part of larger commits, so take those by hand. The
+original's quickstart stays on PyTorch 2.11, which doesn't need C++20.
 
 The rest builds in layers: sizing and `run.sh`, then setup, the manager, benchmarks, and presets.
 `./run.sh server` is useful on its own: it starts a server sized for the card.
@@ -109,6 +125,7 @@ The rest builds in layers: sizing and `run.sh`, then setup, the manager, benchma
 - **Known CVEs:** pip-audit on the pinned packages.
 - **Unit tests:** the ones that need no GPU.
 
-GitHub also runs CodeQL, and Dependabot proposes updates and security fixes. To run the scan before every push, run
-`cp tools/pre-push .git/hooks/pre-push`. The hook also refuses `backup/*` branches, and commits matching a pattern in
+`bash tools/lock.sh` regenerates the hash-pinned package lists (`setup/requirements.txt`,
+`qwenflash/requirements.txt` and `tools/scan-requirements.txt`). GitHub also runs CodeQL, and Dependabot proposes
+updates and security fixes. To run the scan before every push, run `cp tools/pre-push .git/hooks/pre-push`. The hook also refuses `backup/*` branches, and commits matching a pattern in
 `.git/info/push-blocklist`, a local file for private names.
