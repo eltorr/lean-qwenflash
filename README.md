@@ -120,7 +120,8 @@ from them.
 
 ### The original: measured by MaxDevv
 
-From the original README, using `3.05bpw_h5_ng5` with a 4-bit KV cache unless noted:
+From the original README. Benchmarked using `turboderp/Qwen3.8-Flash-Next-exl3` (`3.05bpw_h5_ng5`) with a 4-bit KV
+cache unless noted:
 
 | Hardware | Context | System RAM Used | VRAM Used | Prefill | Decode |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -189,8 +190,10 @@ To size the server for your card automatically, run `./run.sh server` instead of
 - **[lean-qwenflash](https://github.com/MaxDevv/lean-qwenflash) by MaxDevv:** the engine, the expert store, the
   server, and the original benchmarks and docs.
 - Through upstream:
+  - [Qwen3.8-Flash-Next](https://github.com/QwenLM) by the Qwen team: the model;
+  - [Qwen3.8-Flash-Next-exl3](https://huggingface.co/turboderp/Qwen3.8-Flash-Next-exl3) by turboderp: the quantized
+    weights that setup downloads (3.05 and 4.05 bpw), the same ones the original uses;
   - [ExLlamaV3](https://github.com/turboderp-org/exllamav3) by turboderp;
-  - [glm53-flash-offload](https://github.com/sybil-solutions/glm53-flash-offload) by sybil-solutions;
-  - [Qwen3.8-Flash-Next](https://github.com/QwenLM) by the Qwen team.
+  - [glm53-flash-offload](https://github.com/sybil-solutions/glm53-flash-offload) by sybil-solutions.
 - **License:** upstream has no license file yet, so this fork doesn't add one. The bundled ExLlamaV3 and offload
   code keep their MIT licenses.

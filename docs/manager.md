@@ -50,6 +50,14 @@ On Windows, run these as `.venv\Scripts\python -m qwenflash ...`; on Linux, as `
 On Windows, when you commit a change here, *Engine + Python environment* shows **Update available**. Running it
 again syncs the WSL clone; only committed code is synced.
 
+**Model versions:**
+- **Source:** [turboderp/Qwen3.8-Flash-Next-exl3](https://huggingface.co/turboderp/Qwen3.8-Flash-Next-exl3) on
+  Hugging Face.
+- **Pinned:** each quant is pinned to one upload (`PINNED` in `download_http.py`), so every install gets the same
+  files, even after newer uploads appear. A newer upload is only used once it has been tested and the pin changed.
+- **Changing the pin:** running a model step again skips files that are already there. So after a pin change,
+  delete that model's folder and its store file (`store/qwen*.bin`, `.json`), then run the step again.
+
 ## How it shares the GPU
 
 | Profile | VRAM | RAM cache | When |

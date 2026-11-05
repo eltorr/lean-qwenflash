@@ -61,13 +61,13 @@ Everything not listed here is new. Defaults are unchanged unless the new environ
 | `qwen_offload.py` | Configurable VRAM limits; kernels built for the local GPU |
 | `memory_guard.py` | Configurable limit; no crash without a memory cgroup |
 | `qwen_server.py` | Prefill chunk from `QWEN_CHUNK` |
-| `download_http.py` | `--branch` and `--sha`, to fetch 4.05 bpw |
+| `download_http.py` | `--branch` and `--sha`, to fetch 4.05 bpw; both quants are pinned to one upload |
 | `.gitignore` (+ `.gitattributes`) | The fork's files; LF endings for scripts that run in Linux |
 | `README.md` | Rewritten for the fork; the original's intro, benchmarks and manual install are kept |
 
 ## Taking changes upstream
 
-These six commits each stand alone and cherry-pick onto upstream `master`:
+These seven commits each stand alone and cherry-pick onto upstream `master`, in this order:
 
 | Commit | What |
 |---|---|
@@ -77,11 +77,12 @@ These six commits each stand alone and cherry-pick onto upstream `master`:
 | `2f2401c` | `download_http.py --branch/--sha` |
 | `0f7740f` | OpenAI `reasoning_effort` values; `high` returned HTTP 500 |
 | `5e0167e` | Prefill staging sized per layer; kernels for the local GPU; the RAM guard without a cgroup |
+| `ec034b9` | Both quants pinned to one upload and fetched by revision (needs `2f2401c`) |
 
 ```bash
 git remote add eltorr https://github.com/eltorr/lean-qwenflash.git
 git fetch eltorr
-git cherry-pick 59ca8ce e3ae7c2 f05f734 2f2401c 0f7740f 5e0167e
+git cherry-pick 59ca8ce e3ae7c2 f05f734 2f2401c 0f7740f 5e0167e ec034b9
 ```
 
 The rest builds in layers: sizing and `run.sh`, then setup, the manager, benchmarks, and presets.
