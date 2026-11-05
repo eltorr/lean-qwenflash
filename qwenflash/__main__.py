@@ -122,7 +122,7 @@ def cmd_detect(cfg, a):
     e = hw.get("engine") or {}
     if e:
         print(f"engine   {'ready' if e.get('engine') == '1' else 'not set up'} at {cfg['repo_dir'] or 'this checkout'}; "
-              f"CUDA {e.get('cuda_version')}, torch {e.get('torch')}, built for {e.get('build_arch') or '?'}; "
+              f"CUDA {e.get('cuda_version')}, torch {e.get('torch')}{', built for ' + e['build_arch'] if e.get('build_arch') else ''}; "
               f"models: 3.05 {'yes' if e.get('m305') == '1' else 'no'}, 4.05 {'yes' if e.get('m405') == '1' else 'no'}")
     print("recommendations:")
     print_recommendations(hw["recommendations"])

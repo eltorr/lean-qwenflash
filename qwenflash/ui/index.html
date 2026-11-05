@@ -561,7 +561,8 @@ async function loadHardware(refresh) {
   if (g) F.push(["GPU", `${g.name} · ${(g.vram_total / 2 ** 30).toFixed(0)} GB`, `sm_${(g.compute_capability || "?").replace(".", "")} · PCIe ${g.pcie_gen_max}.0 x${g.pcie_width_max} · driver ${hw.driver.version || "?"}${hw.gpus.length > 1 ? ` · ${hw.gpus.length} GPUs` : ""}`]);
   F.push(["CPU & RAM", `${hw.cpu.name || "?"}`, `${hw.cpu.cores} cores · ${hw.ram.total_gb} GB RAM, ${hw.ram.avail_gb} GB free now`]);
   if (w) F.push(["WSL", w.installed ? `WSL ${w.version || ""}` : "not installed", `${w.distro}: ${w.distro_present ? "WSL " + w.distro_wsl_version + (w.distro_path ? " at " + w.distro_path : "") : "not installed"} · .wslconfig memory ${wc.memory_gb ? wc.memory_gb + " GB" : "default (half the RAM)"}`]);
-  if (e && e.driver) F.push(["Engine", e.engine === "1" ? "ready" : "not set up", `CUDA ${e.cuda_version || "-"} · torch ${e.torch || "-"} · built for ${e.build_arch || "?"} · ${e.disk_free_gb || "?"} GB free (${e.fs || "?"})`]);
+  if (e && e.driver) F.push(["Engine", e.engine === "1" ? "ready" : "not set up", [`CUDA ${e.cuda_version || "-"}`, `torch ${e.torch || "-"}`, e.build_arch && `built for ${e.build_arch}`,
+    e.disk_free_gb && `${e.disk_free_gb} GB free` + (e.fs ? ` (${e.fs})` : "")].filter(Boolean).join(" · ")]);
   if (hw.repo && hw.repo.head) F.push(["This checkout", hw.repo.subject || hw.repo.head.slice(0, 7), hw.repo.dirty ? "uncommitted changes (the engine gets committed code only)" : "clean"]);
   $("facts").innerHTML = F.map(([k, v, n]) => `<div><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div><div class="n">${esc(n || "")}</div></div>`).join("");
   const LV = { ok: ["good", "✓"], info: ["accent", "i"], warn: ["warning", "!"], error: ["critical", "✕"] };

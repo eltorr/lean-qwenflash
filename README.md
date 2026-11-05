@@ -137,6 +137,9 @@ so. Point any OpenAI-compatible client (Pi, OpenCode, Claude Code, ...) at:
 - **API key:** any non-empty string
 - **Context window:** `262144`, or the context the preset picked
 
+Both OpenAI APIs work: Chat Completions (`/v1/chat/completions`) and the newer Responses API (`/v1/responses`). See
+[docs/api.md](docs/api.md).
+
 ```bash
 curl http://127.0.0.1:30000/v1/chat/completions -H "Content-Type: application/json" \
   -d '{"model": "qwen3.8-flash-next", "messages": [{"role": "user", "content": "Hello!"}]}'
@@ -224,6 +227,7 @@ cell gives:
 | | Status | Notes |
 |---|---|---|
 | Windows 11 + WSL2, RTX 5090, 64 GB RAM | ✅ In daily use | Both quants at 256K context. Manager, dashboard, setup steps, auto-switch and the Ollama front door |
+| OpenAI API: Chat Completions and Responses | ✅ Tested | End to end with the official `openai` Python SDK on this PC: chat (plain, streamed, tools) and Responses (plain, streamed, a tool round trip, `previous_response_id`) |
 | Native Linux | 🟡 Partly | Checked inside WSL acting as a Linux host: the manager, dashboard, setup status, first-run preset, and the `systemd --user` backend as a normal user. No model has been started on a bare-metal Linux box yet |
 | Setup on a clean machine | ⚪ Not yet | The steps have run on this PC. A clean Windows or Linux install hasn't been tried |
 | Real 8-24 GB cards | ⚪ Not yet | The numbers below come from the RTX 5090 capped to each card size |
