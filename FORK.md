@@ -9,8 +9,8 @@ with the engine in WSL2. I wanted the model's resources to adapt. When a game ne
 itself back or pauses. When the game closes, the model takes the resources back. The rest of the fork grew around
 that. All the measurements come from that PC.
 
-**For MaxDevv:** take anything you like. The engine fixes are standalone commits; see
-[Taking changes upstream](#taking-changes-upstream).
+Clone it and do what you like with it; just keep the credit to MaxDevv for the engine. The engine fixes are
+standalone commits that apply to the original too; see [Taking changes upstream](#taking-changes-upstream).
 
 ## What it adds
 

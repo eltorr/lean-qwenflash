@@ -9,7 +9,7 @@ game needs the GPU or RAM, the model scales itself back or pauses. When the game
 resources back. The fork also adds a dashboard, guided setup on Windows and Linux, and presets that size the model
 to the machine.
 
-MaxDevv, anything here is yours to take into upstream or build on.
+Clone it and make it your own. Just keep the credit to MaxDevv, whose engine it's built on ([Credit](#credit)).
 
 ![QwenFlash dashboard: model state, requests, GPU and RAM use, and activity](docs/images/dashboard.png)
 
