@@ -46,7 +46,8 @@ DEFAULTS = {
     "listen_host": "127.0.0.1",
     "listen_port": 30000,
     "backend_port": 30001,
-    "dashboard_token": "",              # required by the dashboard/control API when listen_host is not loopback
+    "dashboard_token": "",              # the dashboard's private link for other devices (generated when needed)
+    "remote_host": "",                  # this PC's name for other devices, used in that link ("" = computer name)
     "auto_switch": True,
     "wake_on_request": True,
     "preload_on_launch": False,

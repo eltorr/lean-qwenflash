@@ -97,13 +97,14 @@ for chunk in client.chat.completions.create(
 
 ## Control API (the dashboard's, not OpenAI)
 
-Under `http://127.0.0.1:30000/_switcher/api/`, on loopback only.
+Under `http://127.0.0.1:30000/_switcher/api/`, or on the network port with the dashboard token (a Bearer header, or
+the private link's cookie).
 
 | Method | Path | What |
 |---|---|---|
 | GET | `status` | State, profile, pressure, GPU and RAM, counters, speed, events |
 | GET | `metrics` | The last 100 requests: tokens, time to first token, speeds |
 | GET / POST | `config` | POST `{"config": {"quant": "4.05"}}`; keys as in `config.json` |
-| POST | `action` | `{"action": "start_full"}`. Also `start_lean`, `pause`, `restart`, `auto_on`/`auto_off`, `wake_on`/`wake_off`, `quit`, `quit_keep_model` |
+| POST | `action` | `{"action": "start_full"}`. Also `start_lean`, `pause`, `restart`, `auto_on`/`auto_off`, `wake_on`/`wake_off`, `new_remote_link`, `quit`, `quit_keep_model` |
 | GET | `log` | Tails of the model's and the manager's logs |
 | GET / POST | `setup`, `setup/run` | Setup status; `{"step": "build"}` runs one step |

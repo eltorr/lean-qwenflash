@@ -13,14 +13,17 @@ running out of VRAM or RAM lowers that budget for next time ("learned limits").
 """
 import asyncio
 import collections
+import hmac
 import json
 import math
 import re
 import secrets
+import socket
 import statistics
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
 
 from . import config
@@ -702,17 +705,24 @@ class Service:
                 self._front_warned = True
 
     # ================================================================ HTTP entry
-    def authorized(self, headers, target):
-        cfg = self.cfg
-        if cfg["listen_host"] in ("127.0.0.1", "localhost", "::1") or not cfg["dashboard_token"]:
-            return True
+    def token_ok(self, headers, target):
+        """The request carries the dashboard token: ?token=, a Bearer header, or the qf_token cookie."""
+        tok = self.cfg["dashboard_token"]
+        if not tok:
+            return False
         h = {k.lower(): v for k, v in headers}
-        tok = cfg["dashboard_token"]
-        if h.get("authorization", "") == f"Bearer {tok}":
+        given = [h.get("authorization", "").removeprefix("Bearer ").strip(), query_token(target)]
+        for part in h.get("cookie", "").split(";"):
+            name, _, value = part.strip().partition("=")
+            if name == "qf_token":
+                given.append(value)
+        return any(g and hmac.compare_digest(g.encode(), tok.encode()) for g in given)
+
+    def authorized(self, headers, target):
+        """The dashboard on the main port: open on loopback, otherwise it needs the token."""
+        if self.cfg["listen_host"] in ("127.0.0.1", "localhost", "::1") or not self.cfg["dashboard_token"]:
             return True
-        if f"qf_token={tok}" in h.get("cookie", "").replace(" ", ""):
-            return True
-        return f"token={tok}" in target
+        return self.token_ok(headers, target)
 
     async def handle(self, reader, writer):
         try:
@@ -722,11 +732,15 @@ class Service:
             return
         path = target.split("?", 1)[0]
         p = path.rstrip("/") or "/"
-        # The Ollama-compatible front door (also what a tailnet reaches via `tailscale serve`): chat is answered
-        # here, everything else passes through to Ollama, and the dashboard/control API is never served.
+        # The network port (also what a tailnet reaches via `tailscale serve`) serves the API. The dashboard and
+        # control API answer there only with the dashboard token; without it, "/" stays a plain health check.
         front = writer.get_extra_info("sockname")[1] == self.cfg["ollama_alias_port"]
+        dash = path.startswith("/_switcher") or path == "/"
         try:
-            if path.startswith("/_switcher") or (path == "/" and not front):
+            if dash and front and self.token_ok(headers, target):
+                await self.api(method, path, target, body, writer)
+                close(writer)
+            elif path.startswith("/_switcher") or (path == "/" and not front):
                 if front:
                     await respond(writer, 404, {"error": "not found"})
                 elif not self.authorized(headers, target):
@@ -813,16 +827,21 @@ class Service:
             "ollama": {"up": self.ollama_up, "port": cfg["ollama_port"], "models": len(self.ollama_models),
                        "requests": self.ollama_requests, "front_port": cfg["ollama_alias_port"],
                        "front_bound": bool(self.front_server)},
+            # where other devices reach the API and, with the private link, the dashboard
+            "remote": {"port": cfg["ollama_alias_port"] if self.front_server else 0,
+                       "host": cfg["remote_host"] or socket.gethostname().lower()},
             "setup_running": self.setup.running,
         }
 
     async def api(self, method, path, target, body, writer):
         if path in ("/", "/_switcher", "/_switcher/", "/_switcher/index.html"):  # the dashboard, at the root
-            extra = ()
-            m = re.search(r"token=([\w-]+)", target)
-            if m:
-                extra = (f"Set-Cookie: qf_token={m.group(1)}; Path=/; HttpOnly; SameSite=Strict",)
-            await respond(writer, 200, UI_FILE.read_bytes(), "text/html; charset=utf-8", extra)
+            tok = query_token(target)
+            if tok and self.token_ok((), target):
+                # a private link: remember the token for a year, then drop it from the address bar
+                await respond(writer, 302, b"", "text/plain", (
+                    "Location: /", f"Set-Cookie: qf_token={tok}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax"))
+                return
+            await respond(writer, 200, UI_FILE.read_bytes(), "text/html; charset=utf-8")
             return
         try:
             data = json.loads(body or b"{}")
@@ -917,6 +936,11 @@ class Service:
             ok = True
         elif a in ("autostart_on", "autostart_off"):
             ok, msg = self.host.set_autostart(a == "autostart_on")
+        elif a == "new_remote_link":
+            cfg["dashboard_token"] = secrets.token_urlsafe(18)
+            config.save_config(cfg)
+            self.event("config", "new private link for other devices; the old one no longer works")
+            ok = True
         elif a == "forget_learned":
             self.learned.pop(self.learned_key(), None)
             config.save_json("learned.json", self.learned)
@@ -1031,10 +1055,11 @@ class Service:
         self.tlock = asyncio.Lock()
         self.quit = asyncio.Event()
         cfg = self.cfg
-        if cfg["listen_host"] not in ("127.0.0.1", "localhost", "::1") and not cfg["dashboard_token"]:
+        remote = cfg["listen_host"] not in ("127.0.0.1", "localhost", "::1") or cfg["ollama_alias_port"]
+        if remote and not cfg["dashboard_token"] and not self.observe:
             cfg["dashboard_token"] = secrets.token_urlsafe(18)
             config.save_config(cfg)
-            log.warning("listening on %s: generated a dashboard token (config.json dashboard_token)", cfg["listen_host"])
+            log.info("generated a dashboard token for other devices (config.json dashboard_token)")
         self.mon.start()
         hosts = ["127.0.0.1", "::1"] if cfg["listen_host"] == "127.0.0.1" else [cfg["listen_host"]]
         try:
@@ -1064,6 +1089,11 @@ class Service:
             await self.quit.wait()
         if self.host.follower:
             self.host.follower.stop()
+
+
+def query_token(target):
+    """The token= value in a request target's query string, or ""."""
+    return urllib.parse.parse_qs(urllib.parse.urlsplit(target).query).get("token", [""])[0]
 
 
 def tail_file(path, lines=200):

@@ -101,18 +101,25 @@ staging fits.
 
 ## Other machines
 
-The dashboard and API listen on `127.0.0.1` only.
+Port 30000 serves the dashboard at `/` and the API at `/v1`, on `127.0.0.1` only. To reach the PC from your phone
+and other devices, use the network port:
 
-- **Dashboard over SSH:** `ssh -L 30000:127.0.0.1:30000 host`.
-- **API for other devices:**
-  1. Turn on the API-only port: set `"ollama_alias_port": 11434` in `config.json` and restart the service. This
-     port serves the OpenAI API but never the dashboard.
-  2. Expose the port, for example on a tailnet:
+1. **Turn it on:** set `"ollama_alias_port": 11434` in `config.json`, then restart the service.
+2. **Expose it,** for example on a tailnet:
 
-     ```
-     tailscale serve --bg --tcp=11434 tcp://127.0.0.1:11434
-     ```
+   ```
+   tailscale serve --bg --tcp=11434 tcp://127.0.0.1:11434
+   ```
 
-  3. Clients use `http://<tailnet-host>:11434/v1`.
-- **Dashboard without SSH:** set `listen_host` in `config.json`. This needs the `dashboard_token` the manager then
-  creates, given once as `?token=...`.
+3. **API:** clients use `http://<tailnet-host>:11434/v1`.
+4. **Dashboard:**
+   1. On the PC, copy the private link from **Settings > Other devices**.
+   2. Open it once on each device; the device then remembers it.
+   3. **New link** makes the old one stop working.
+
+   Without the link, the port serves only the API, and `/` answers "QwenFlash is running".
+
+Don't expose port 30000 itself. It trusts every connection that comes from the PC, and `tailscale serve` forwards
+connections from the PC.
+
+Over SSH, `ssh -L 30000:127.0.0.1:30000 host` reaches everything instead.

@@ -116,9 +116,15 @@
   .field { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 14px; align-items: center; margin: 10px 0; }
   .field label { line-height: 1.35; }
   .field .help { grid-column: 1 / -1; color: var(--text-muted); font-size: 12px; margin-top: -2px; line-height: 1.4; }
-  .field input[type=number], .field select, textarea { font: inherit; background: var(--surface-2); color: var(--text-primary);
-    border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; width: 100%; }
+  .field input[type=number], .field input[type=text], .field select, textarea { font: inherit; background: var(--surface-2);
+    color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; width: 100%; }
   .field select { width: auto; min-width: 180px; max-width: 100%; }
+  .field input[type=text] { width: min(260px, 100%); }
+  .form .wide { grid-column: 1 / -1; }
+  .linkrow { display: flex; gap: 8px; align-items: center; margin: 10px 0 4px; }
+  .linkrow code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 6px; padding: 5px 9px; }
+  body.remote .local-only { display: none !important; }
   .field input[type=number] { width: 96px; text-align: right; font-variant-numeric: tabular-nums; }
   .field input[type=checkbox] { width: 18px; height: 18px; margin: 0; justify-self: end; }
   textarea { min-height: 80px; grid-column: 1 / -1; }
@@ -250,9 +256,9 @@
       <button class="primary" id="saveBtn">Save settings</button>
       <span class="muted" id="saveMsg"></span>
       <button id="forgetBtn" title="Forget VRAM/RAM caps learned from out-of-memory crashes">Forget learned limits</button>
-      <label class="switch" style="margin-left:auto"><input type="checkbox" id="autostartToggle"> <span id="autostartLabel">Start the service when I sign in</span></label>
-      <button id="quitKeepBtn" title="Quit the dashboard service but leave the model running; the next start picks it up">Quit, keep model</button>
-      <button id="quitBtn" title="Stops the model and the service; clients get no answer until you start it again">Quit service</button>
+      <label class="switch local-only" style="margin-left:auto"><input type="checkbox" id="autostartToggle"> <span id="autostartLabel">Start the service when I sign in</span></label>
+      <button class="local-only" id="quitKeepBtn" title="Quit the dashboard service but leave the model running; the next start picks it up">Quit, keep model</button>
+      <button class="local-only" id="quitBtn" title="Stops the model and the service; clients get no answer until you start it again">Quit service</button>
     </div>
   </section>
   <section class="panel" id="p-setup">
@@ -272,6 +278,17 @@
 </div>
 <script>
 const $ = (id) => document.getElementById(id);
+// opened from another device through the private link: hide what only makes sense at the PC
+const REMOTE = !["127.0.0.1", "localhost", "[::1]", "::1"].includes(location.hostname);
+if (REMOTE) document.body.classList.add("remote");
+async function copyText(text, btn) {
+  try { await navigator.clipboard.writeText(text); }
+  catch {  // plain http from another device has no clipboard API
+    const a = document.createElement("textarea"); a.value = text; document.body.appendChild(a); a.select();
+    document.execCommand("copy"); a.remove();
+  }
+  if (btn) { const t = btn.textContent; btn.textContent = "Copied"; setTimeout(() => (btn.textContent = t), 1200); }
+}
 const API = "/_switcher/api/";
 const gb = (b) => (b / 1e9).toFixed(1);
 let S = null, CFG = null, DEF = null, tab = "activity", setupSeq = 0;
@@ -318,7 +335,8 @@ function renderStatus() {
   $("recNote").style.display = bad.length ? "block" : "none";
   $("recNote").innerHTML = bad.map((r) => `<b>${esc(r.title)}</b>${r.detail ? " · " + esc(r.detail) : ""}`).join("<br>") +
     (bad.length ? ` <a href="#" onclick="showTab('setup');return false">Details</a>` : "");
-  $("endpoint").textContent = S.endpoint;
+  $("endpoint").textContent = REMOTE ? location.origin + "/v1" : S.endpoint;
+  updateRemoteLink();
   const key = S.state === "running" ? "running_" + S.tier : S.state;
   const [cls, ic, label, sub] = STATES[key] || STATES.error;
   $("stateIcon").className = "icon " + cls; $("stateIcon").textContent = ic;
@@ -510,7 +528,42 @@ function renderForm() {
     else if (type === "textarea") input = `<textarea data-k="${k}">${esc((v || []).join("\n"))}</textarea>`;
     else input = `<input type="number" step="any" data-k="${k}" value="${v}">`;
     return `<div class="field"><label>${label}</label>${type === "textarea" ? "" : input}${type === "textarea" ? input : ""}${help ? `<div class="help">${help}</div>` : ""}</div>`;
-  }).join("") + `</fieldset>`).join("");
+  }).join("") + `</fieldset>`).join("") + remoteFieldset();
+  if ($("remoteCopy")) {
+    $("remoteCopy").onclick = () => copyText(remoteLink(), $("remoteCopy"));
+    $("remoteNew").onclick = async () => {
+      if (!confirm("Make a new private link? The old link stops working on every device that uses it.")) return;
+      await api("action", { action: "new_remote_link" }); await loadConfig();
+    };
+  }
+  updateRemoteLink();
+}
+
+// ---- the dashboard on other devices (the network port, with a private link)
+function remoteFieldset() {
+  if (!CFG.ollama_alias_port || REMOTE) return "";
+  const name = (S && S.remote && S.remote.host) || "";
+  return `<fieldset class="wide"><legend>Other devices</legend>
+    <div class="field"><label>This PC's name for other devices</label>
+      <input type="text" data-k="remote_host" value="${esc(CFG.remote_host || "")}" placeholder="${esc(name)}">
+      <div class="help">Used in the link below, such as its tailnet name. Empty uses the computer name.</div></div>
+    <div class="linkrow"><code id="remoteLink"></code><button type="button" id="remoteCopy">Copy</button>
+      <button type="button" id="remoteNew">New link</button></div>
+    <div class="field"><div class="help">Open this private link on your phone or another device to use this dashboard
+      there; the device remembers it. Anyone with the link gets full control, so keep it to yourself. <b>New link</b>
+      stops the old one from working. Without the link, port ${CFG.ollama_alias_port} only serves the API.</div></div>
+  </fieldset>`;
+}
+function remoteLink() {
+  if (!CFG.dashboard_token) return "The link appears after the service restarts.";
+  const host = CFG.remote_host || (S && S.remote && S.remote.host) || "this-pc";
+  return `http://${host}:${CFG.ollama_alias_port}/?token=${encodeURIComponent(CFG.dashboard_token)}`;
+}
+function updateRemoteLink() {
+  if (!$("remoteLink") || !CFG) return;
+  $("remoteLink").textContent = remoteLink();
+  const name = document.querySelector('[data-k="remote_host"]');
+  if (name && S && S.remote) name.placeholder = S.remote.host;
 }
 async function saveSettings() {
   const changes = {};
@@ -590,7 +643,7 @@ $("checkBtn").onclick = () => { $("setupDetail").textContent = "checking…"; lo
 $("quitBtn").onclick = async () => { if (confirm("Stop the model and quit the QwenFlash service?")) await api("action", { action: "quit" }); };
 $("quitKeepBtn").onclick = async () => { if (confirm("Quit the QwenFlash service but leave the model running? Clients can't reach it until the service starts again.")) await api("action", { action: "quit_keep_model" }); };
 $("forgetBtn").onclick = async () => { const r = await api("action", { action: "forget_learned" }); alertMsg(r.ok ? "forgot learned limits" : r.message); };
-$("copyBtn").onclick = () => navigator.clipboard.writeText($("endpoint").textContent);
+$("copyBtn").onclick = () => copyText($("endpoint").textContent, $("copyBtn"));
 document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => {
   tab = b.dataset.tab;
   document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
