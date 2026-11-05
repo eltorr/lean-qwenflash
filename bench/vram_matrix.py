@@ -61,8 +61,9 @@ def gpu_used_total():
     return used, total
 
 
-def chat(port, content, max_tokens):
-    body = json.dumps({"model": "qwen3.8-flash-next", "stream": True, "max_tokens": max_tokens,
+def chat(port, content):
+    """One streamed chat. No max_tokens: every answer runs to its natural end (never cap output in benchmarks)."""
+    body = json.dumps({"model": "qwen3.8-flash-next", "stream": True,
                        "messages": [{"role": "user", "content": content}]}).encode()
     req = urllib.request.Request(f"http://127.0.0.1:{port}/v1/chat/completions", body,
                                  {"Content-Type": "application/json"})
@@ -91,9 +92,9 @@ def chat(port, content, max_tokens):
 
 
 def workload(port, context):
-    res = {"cold_first": chat(port, PROMPTS[0], 600)}
-    chat(port, PROMPTS[1], 400)                                       # warm-up, not scored
-    runs = [chat(port, p, 700) for p in PROMPTS[1:]]
+    res = {"cold_first": chat(port, PROMPTS[0])}
+    chat(port, PROMPTS[1])                                            # warm-up, not scored
+    runs = [chat(port, p) for p in PROMPTS[1:]]
     rates = [r["decode_tps"] for r in runs if r["decode_tps"]]
     res["decode_tps_median"] = statistics.median(rates) if rates else None
     res["decode_tps_min"] = min(rates) if rates else None
@@ -104,7 +105,7 @@ def workload(port, context):
     half = len(filler) // 2
     doc = filler[:half] + "\n# NOTE: the deployment password is 'violet-otter-42'.\n" + filler[half:]
     q = doc + "\n\nWhat is the deployment password mentioned in the code? Answer in one line."
-    long = chat(port, q, 1500)
+    long = chat(port, q)
     long["prefill_tps"] = long["prompt_tokens"] / long["ttft_s"] if long["ttft_s"] else None
     long["needle_found"] = "violet-otter-42" in long["answer"]
     res["long"] = long
