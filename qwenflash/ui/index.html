@@ -491,7 +491,6 @@ const FIELDS = [
   ["Model", [
     ["quant", "Model version", "select", [["3.05", "3.05 bpw: fastest"], ["4.05", "4.05 bpw: higher fidelity (more RAM)"]], "Changing this restarts the model."],
     ["context", "Context window", "select", [[16384, "16K"], [32768, "32K"], [65536, "64K"], [98304, "96K"], [131072, "128K"], [196608, "192K"], [262144, "256K (max)"]], "Keep your client's context setting the same. Smaller windows leave more VRAM for the expert cache (matters on 12-16 GB cards)."],
-    ["qwenflash_aliases", "Also answer these model names", "textarea", null, "Chat requests naming these models go to QwenFlash instead of Ollama, e.g. qwen3.8. Other installed Ollama models still go to Ollama."],
   ]],
   ["When other apps need resources", [
     ["pressure_response", "Moderate pressure", "select", [["lean", "Scale back to lean"], ["pause", "Pause"]], "Heavy pressure always pauses."],
@@ -521,7 +520,6 @@ const FIELDS = [
 ];
 function renderForm() {
   $("form").innerHTML = FIELDS.map(([title, fs]) => `<fieldset><legend>${title}</legend>` + fs.map(([k, label, type, opts, help]) => {
-    if (k === "qwenflash_aliases" && !CFG.ollama_alias_port) return "";   // only with the Ollama-style front door
     const v = CFG[k]; let input;
     if (type === "select") input = `<select data-k="${k}">${opts.map(([ov, ol]) => `<option value="${ov}" ${String(ov) === String(v) ? "selected" : ""}>${ol}</option>`).join("")}</select>`;
     else if (type === "check") input = `<input type="checkbox" data-k="${k}" ${v ? "checked" : ""}>`;
@@ -541,7 +539,7 @@ function renderForm() {
 
 // ---- the dashboard on other devices (the network port, with a private link)
 function remoteFieldset() {
-  if (!CFG.ollama_alias_port || REMOTE) return "";
+  if (!CFG.network_port || REMOTE) return "";
   const name = (S && S.remote && S.remote.host) || "";
   return `<fieldset class="wide"><legend>Other devices</legend>
     <div class="field"><label>This PC's name for other devices</label>
@@ -551,13 +549,13 @@ function remoteFieldset() {
       <button type="button" id="remoteNew">New link</button></div>
     <div class="field"><div class="help">Open this private link on your phone or another device to use this dashboard
       there; the device remembers it. Anyone with the link gets full control, so keep it to yourself. <b>New link</b>
-      stops the old one from working. Without the link, port ${CFG.ollama_alias_port} only serves the API.</div></div>
+      stops the old one from working. Without the link, port ${CFG.network_port} only serves the API.</div></div>
   </fieldset>`;
 }
 function remoteLink() {
   if (!CFG.dashboard_token) return "The link appears after the service restarts.";
   const host = CFG.remote_host || (S && S.remote && S.remote.host) || "this-pc";
-  return `http://${host}:${CFG.ollama_alias_port}/?token=${encodeURIComponent(CFG.dashboard_token)}`;
+  return `http://${host}:${CFG.network_port}/?token=${encodeURIComponent(CFG.dashboard_token)}`;
 }
 function updateRemoteLink() {
   if (!$("remoteLink") || !CFG) return;

@@ -44,7 +44,7 @@ def cmd_serve(cfg, a):
         return 0
     if a.observe:
         # never compete with the real service for its ports
-        cfg["ollama_alias_port"] = 0
+        cfg["network_port"] = 0
     asyncio.run(Service(cfg, observe=a.observe).serve(a.open))
     return 0
 

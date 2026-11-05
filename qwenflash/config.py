@@ -80,15 +80,12 @@ DEFAULTS = {
     "start_timeout_s": 600,
     "poll_s": 1.5,
     "ui_browser": "",
-    # Optional Ollama-compatible front door, for replacing an Ollama install (docs/manager.md): set ollama_alias_port
-    # to 11434 and QwenFlash answers on Ollama's usual port, passing anything it doesn't serve to an Ollama moved
-    # to ollama_port. 0 (the default) leaves it off.
-    "ollama_port": 11435,
-    "ollama_alias_port": 0,
-    "qwenflash_aliases": [],
+    # Optional port for other devices, such as over a tailnet (docs/manager.md): /v1 is the API, and the root is the
+    # dashboard with its private link. 0 (the default) leaves it off.
+    "network_port": 0,
 }
 # settings that only take effect when the service restarts
-SERVICE_KEYS = {"listen_port", "backend_port", "listen_host", "repo_dir", "distro", "ollama_port", "ollama_alias_port"}
+SERVICE_KEYS = {"listen_port", "backend_port", "listen_host", "repo_dir", "distro", "network_port"}
 RENAMED = {"windows_ram_reserve_gb": "ram_reserve_gb"}
 
 logging.basicConfig(filename=LOG_DIR / "manager.log", level=logging.INFO,

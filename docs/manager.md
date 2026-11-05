@@ -104,14 +104,14 @@ staging fits.
 Every port uses the same layout: the API is under `/v1`, and the web page is at `/`. Port 30000 listens on
 `127.0.0.1` only. To reach the PC from your phone and other devices, use the network port:
 
-1. **Turn it on:** set `"ollama_alias_port": 11434` in `config.json`, then restart the service.
+1. **Turn it on:** set `"network_port"` in `config.json` to any free port, such as `8080`, then restart the service.
 2. **Expose it,** for example on a tailnet:
 
    ```
-   tailscale serve --bg --tcp=11434 tcp://127.0.0.1:11434
+   tailscale serve --bg --tcp=8080 tcp://127.0.0.1:8080
    ```
 
-3. **API:** clients use `http://<tailnet-host>:11434/v1`.
+3. **API:** clients use `http://<tailnet-host>:8080/v1`.
 4. **Dashboard:**
    1. On the PC, copy the private link from **Settings > Other devices**.
    2. Open it once on each device; the device then remembers it.

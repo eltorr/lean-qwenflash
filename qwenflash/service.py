@@ -24,7 +24,6 @@ import sys
 import threading
 import time
 import urllib.parse
-import urllib.request
 
 from . import config
 from .config import GB, GIB, LOG_DIR, REPO, SERVED_NAME, SERVICE_KEYS, log
@@ -114,7 +113,6 @@ class Service:
         self.recover = {"attempts": 0, "window_start": 0.0, "next_at": None, "tier": None}
         self.learned = config.load_json("learned.json", {})
         self.quit = None
-        self.ollama_list, self.ollama_models, self.ollama_up, self.ollama_requests = [], set(), False, 0
         self.front_server, self._front_warned = None, False
 
     def _gpu_display(self):
@@ -632,77 +630,23 @@ class Service:
                 "tokens_out": sum(r["completion"] for r in self.metrics),
                 "tokens_in": sum(r["prompt"] for r in self.metrics)}
 
-    # ================================================================ Ollama side-by-side
-    def ollama_has(self, model):
-        return model in self.ollama_models or (":" not in model and model + ":latest" in self.ollama_models)
-
-    def route_model(self, body):
-        """'qwen' or 'ollama' for an OpenAI chat/completions request, by its model name. Anything that isn't an
-        installed Ollama model goes to QwenFlash (it serves one model and ignores the name)."""
-        try:
-            model = str(json.loads(body or b"{}").get("model") or "")
-        except (ValueError, AttributeError):
-            return "qwen"
-        if model == SERVED_NAME or model in self.cfg["qwenflash_aliases"]:
-            return "qwen"
-        return "ollama" if model and self.ollama_up and self.ollama_has(model) else "qwen"
-
+    # ================================================================ the network port
     def models_list(self):
-        own = {"id": SERVED_NAME, "object": "model", "created": 0, "owned_by": "qwenflash",
-               "max_model_len": self.cfg["context"]}
-        others = [m for m in self.ollama_list if m.get("id") != SERVED_NAME] if self.ollama_up else []
-        return {"object": "list", "data": [own] + others}
-
-    async def refresh_ollama(self):
-        url = f"http://127.0.0.1:{self.cfg['ollama_port']}/v1/models"
-
-        def fetch():
-            with urllib.request.urlopen(url, timeout=2) as r:
-                return json.load(r)
-        try:
-            data = await asyncio.to_thread(fetch)
-            self.ollama_list = list(data.get("data") or [])
-            self.ollama_models = {m.get("id") for m in self.ollama_list if m.get("id")}
-            if not self.ollama_up:
-                self.event("ollama", f"Ollama reachable on :{self.cfg['ollama_port']} "
-                                     f"({len(self.ollama_models)} models)")
-            self.ollama_up = True
-        except Exception:  # noqa: BLE001 - Ollama not running is a normal state
-            if self.ollama_up:
-                self.event("ollama", f"Ollama not reachable on :{self.cfg['ollama_port']}")
-            self.ollama_up = False
-
-    async def forward_ollama(self, method, target, headers, body, writer):
-        port = self.cfg["ollama_port"]
-        self.ollama_requests += 1
-        bw = None
-        try:
-            try:
-                br, bw = await asyncio.open_connection("127.0.0.1", port)
-            except OSError:
-                await respond(writer, 502, oai_error(f"Ollama is not running on 127.0.0.1:{port}", "bad_gateway", 502))
-                return
-            bw.write(backend_request(method, target, headers, body, port))
-            await bw.drain()
-            await pipe(br, writer)
-        except (ConnectionError, asyncio.IncompleteReadError):
-            pass
-        finally:
-            close(bw, writer)
+        return {"object": "list", "data": [{"id": SERVED_NAME, "object": "model", "created": 0,
+                                            "owned_by": "qwenflash", "max_model_len": self.cfg["context"]}]}
 
     async def bind_front(self):
-        """Listen on the Ollama-compatible front door (default 127.0.0.1:11434) once Ollama has moved off it."""
-        if self.front_server or not self.cfg["ollama_alias_port"] or self.observe:
+        """Listen on the network port (127.0.0.1:network_port), which `tailscale serve` or similar exposes."""
+        if self.front_server or not self.cfg["network_port"] or self.observe:
             return
         try:
             self.front_server = await asyncio.start_server(self.handle, ["127.0.0.1", "::1"],
-                                                           self.cfg["ollama_alias_port"], limit=8 * 1024 * 1024)
-            self.event("service", f"front door listening on 127.0.0.1:{self.cfg['ollama_alias_port']} "
-                                  f"(QwenFlash chat + Ollama pass-through)")
+                                                           self.cfg["network_port"], limit=8 * 1024 * 1024)
+            self.event("service", f"network port listening on 127.0.0.1:{self.cfg['network_port']}")
         except OSError as e:
             if not self._front_warned:
-                self.event("warning", f"port {self.cfg['ollama_alias_port']} is busy ({e.strerror}); is Ollama still "
-                                      f"listening there? Retrying every 30 s.")
+                self.event("warning", f"network port {self.cfg['network_port']} is busy ({e.strerror}); "
+                                      f"retrying every 30 s.")
                 self._front_warned = True
 
     # ================================================================ HTTP entry
@@ -736,7 +680,7 @@ class Service:
         # The network port (also what a tailnet reaches via `tailscale serve`): /v1 is the API, and the root is the
         # web page. The dashboard and control API answer there only with the dashboard token; without it, the root
         # is a sign-in page that takes the private link.
-        front = writer.get_extra_info("sockname")[1] == self.cfg["ollama_alias_port"]
+        front = writer.get_extra_info("sockname")[1] == self.cfg["network_port"]
         dash = path.startswith("/_switcher") or path == "/"
         page = path in ("/", "/_switcher", "/_switcher/", "/_switcher/index.html")
         try:
@@ -758,16 +702,14 @@ class Service:
             elif method == "GET" and p == "/v1/models":
                 await respond(writer, 200, self.models_list())
                 close(writer)
-            elif p in ("/v1/chat/completions", "/v1/responses", "/v1/completions") and self.route_model(body) == "qwen":
+            elif p in ("/v1/chat/completions", "/v1/responses", "/v1/completions"):
+                # one model: any model name is answered by it
                 await self.forward(method, target, headers, body, writer)
-            elif (front or path.startswith("/v1/")) and self.ollama_up:
-                await self.forward_ollama(method, target, headers, body, writer)
             elif front or path.startswith("/v1/"):
                 await respond(writer, 404, {"error": {
                     "message": f"{path} is not available: this server is QwenFlash (OpenAI-compatible: "
                                f"/v1/chat/completions, /v1/responses, /v1/completions, /v1/models). Embeddings, "
-                               f"images, the Anthropic "
-                               f"/v1/messages API and Ollama's /api/* are not supported.",
+                               f"images and the Anthropic /v1/messages API are not supported.",
                     "type": "not_found", "code": 404}})
                 close(writer)
             else:
@@ -827,11 +769,8 @@ class Service:
             "observe": self.observe, "engine_sync": self.engine_sync(),
             "recommendations": hw.get("recommendations"),
             "quants": {q: {"label": v["label"]} for q, v in sizing.QUANTS.items()},
-            "ollama": {"up": self.ollama_up, "port": cfg["ollama_port"], "models": len(self.ollama_models),
-                       "requests": self.ollama_requests, "front_port": cfg["ollama_alias_port"],
-                       "front_bound": bool(self.front_server)},
             # where other devices reach the API and, with the private link, the dashboard
-            "remote": {"port": cfg["ollama_alias_port"] if self.front_server else 0,
+            "remote": {"port": cfg["network_port"] if self.front_server else 0,
                        "host": cfg["remote_host"] or socket.gethostname().lower()},
             "setup_running": self.setup.running,
         }
@@ -978,7 +917,6 @@ class Service:
                 if n % 10 == 0 and self.be.state == "running" and not self.observe:
                     await self.check_alive()
                 if n % 30 == 0:
-                    await self.refresh_ollama()
                     await self.bind_front()
                 if n % 600 == 0:
                     asyncio.create_task(self.setup.check())
@@ -1058,7 +996,7 @@ class Service:
         self.tlock = asyncio.Lock()
         self.quit = asyncio.Event()
         cfg = self.cfg
-        remote = cfg["listen_host"] not in ("127.0.0.1", "localhost", "::1") or cfg["ollama_alias_port"]
+        remote = cfg["listen_host"] not in ("127.0.0.1", "localhost", "::1") or cfg["network_port"]
         if remote and not cfg["dashboard_token"] and not self.observe:
             cfg["dashboard_token"] = secrets.token_urlsafe(18)
             config.save_config(cfg)
@@ -1076,7 +1014,6 @@ class Service:
         await self.adopt_or_clean()
         self.event("service", f"{'observing' if self.observe else 'listening'} on {cfg['listen_host']}:"
                               f"{cfg['listen_port']} ({self.host.label}; model on :{cfg['backend_port']})")
-        await self.refresh_ollama()
         await self.bind_front()
         asyncio.create_task(self.control_loop())
         asyncio.create_task(self.setup.check())
