@@ -1,239 +1,99 @@
 # About this fork
 
-This is [eltorr](https://github.com/eltorr)'s personal fork of
-**[MaxDevv/lean-qwenflash](https://github.com/MaxDevv/lean-qwenflash)**. It was forked at upstream commit
-[`fa9a772`](https://github.com/MaxDevv/lean-qwenflash/commit/fa9a772d9aa9b94a5653a2c6880eeb97af0d2e9d) (26 Oct 2026).
+[eltorr](https://github.com/eltorr)'s fork of **[MaxDevv/lean-qwenflash](https://github.com/MaxDevv/lean-qwenflash)**,
+forked at [`fa9a772`](https://github.com/MaxDevv/lean-qwenflash/commit/fa9a772d9aa9b94a5653a2c6880eeb97af0d2e9d)
+(26 Oct 2026).
 
-Upstream is the engine. It streams Qwen3.8-Flash-Next's experts from NVMe, packs the expert store, and serves the
-model, so a 125B MoE model runs at full context on a 16 GB card. This fork builds on that engine without replacing
-it. It adds:
+It started because my AI machine is also my gaming PC: an RTX 5090, a Ryzen 9 9950X, 64 GB of RAM, and Windows 11
+with the engine in WSL2. I wanted the model's resources to adapt. When a game needs the GPU or RAM, the model scales
+itself back or pauses. When the game closes, the model takes the resources back. The rest of the fork grew around
+that. All the measurements come from that PC.
 
-- a manager with a web dashboard;
-- setup for Windows (WSL2) and Linux;
-- presets that size the model to the machine;
-- a handful of engine fixes found along the way.
-
-It is tuned for my own machine and network, so some defaults and docs are personal; see
-[What's personal here](#whats-personal-here).
-
-**For MaxDevv:** anything here is yours to take, adapt or ignore. The engine fixes are small, standalone commits;
-see [Taking changes upstream](#taking-changes-upstream).
-
-![QwenFlash dashboard](docs/images/dashboard.png)
-
-## Credit
-
-- **[MaxDevv/lean-qwenflash](https://github.com/MaxDevv/lean-qwenflash)**: the engine, the expert store, the
-  server, the benchmarks and the original README. Everything this fork does runs on top of it.
-- Through upstream:
-  - [ExLlamaV3](https://github.com/turboderp-org/exllamav3) by turboderp: quantization format and inference
-    runtime. MIT, see `exllamav3/LICENSE`.
-  - [glm53-flash-offload](https://github.com/sybil-solutions/glm53-flash-offload) by sybil-solutions: NVMe staging
-    and memory tiering. MIT, see `qwen38-flash-offload/LICENSE`.
-  - [Qwen3.8-Flash-Next](https://github.com/QwenLM) by the Qwen team.
-
-Upstream has no top-level license file yet, so this fork doesn't add one either. The vendored parts keep their MIT
-licenses.
-
-## What's personal here
-
-The fork exists to run this model as a home service on one machine: an RTX 5090 (32 GB), a Ryzen 9 9950X and 64 GB
-of RAM, on Windows 11 with the engine in WSL2. Other devices on my tailnet use it, and its main client is an agent
-(Hermes Agent). Some of that shows in the defaults and docs:
-
-- [docs/manager.md](docs/manager.md) has a section on serving a tailnet with `tailscale serve`.
-- The model gives the GPU back to games: it scales back or pauses when other apps need the card or the RAM.
-- All measurements come from that one machine. Smaller cards were emulated by capping the engine on the 5090, so
-  real 8-24 GB cards have less bandwidth and will be slower. See
-  [research/vram-scaling/REPORT.md](research/vram-scaling/REPORT.md).
-
-The rest is meant to be general: the sizing and presets, setup for Linux and WSL2, and the engine fixes.
+**For MaxDevv:** take anything you like. The engine fixes are standalone commits; see
+[Taking changes upstream](#taking-changes-upstream).
 
 ## What it adds
 
-![Setup tab: detected hardware, the preset for this machine, and the setup steps](docs/images/dashboard-setup.png)
+- **Manager** ([`qwenflash/`](qwenflash), [guide](docs/manager.md)). It runs the model as a service:
+  - loads it on the first request;
+  - picks a full or lean profile from the free VRAM and RAM;
+  - scales back or pauses for games, and comes back when they're done;
+  - restarts it after a crash, using smaller limits after running out of memory;
+  - shows it all on a local dashboard.
+- **Setup** ([`setup/`](setup), [`qwenflash/setup.py`](qwenflash/setup.py)). It detects Windows or Linux and runs
+  each install step, from the dashboard or a terminal.
+- **Sizing and presets** ([`sizing.py`](sizing.py), [`run.sh`](run.sh)). They pick the quant, context and RAM cache
+  from the VRAM and RAM. The README's tables are generated from it.
+- **Benchmarks** ([`bench/`](bench), [`research/`](research)). VRAM scaling for 8-32 GB cards, on a 5090 capped to
+  each size.
+- **Tests** ([`tests/`](tests)).
 
-**The manager** ([`qwenflash/`](qwenflash), [docs/manager.md](docs/manager.md)). It is plain Python
-(`psutil`, plus `pywin32` on Windows) and never touches the GPU itself.
+## API: what's original and what's new
 
-- **Endpoints:** an OpenAI-compatible endpoint (Chat Completions and Responses) on `127.0.0.1:30000/v1`.
-  [docs/api.md](docs/api.md) describes it; see also
-  [the API: what's original and what's new](#the-api-whats-original-and-whats-new).
-- **Model lifecycle:**
-  - Loads the model when a client calls it.
-  - Picks a full or lean profile from the free VRAM and RAM.
-  - Scales back or pauses for other GPU apps, and re-saturates when they're done.
-  - Restarts it after a crash, and learns lower limits after running out of memory.
-  - Grows the RAM cache when RAM frees up.
-  - Keeps the model running across its own restarts.
-- **Dashboard:** state, speed, GPU/RAM use over time, settings, setup and logs. It is bound to loopback only.
-- **Platforms:** [`host.py`](qwenflash/host.py) runs the engine on native Linux, or inside WSL2 from Windows. On
-  Windows it measures each app's VRAM through NVML ([`nvml.py`](qwenflash/nvml.py)).
+- **Original:**
+  - `/v1/chat/completions`, with streaming, function calling and reasoning levels;
+  - `/v1/completions`;
+  - `/v1/models`;
+  - the tool endpoints `/generate`, `/tokenize`, `/server_info` and `/stats`.
+- **Fixed in the engine:** OpenAI's `reasoning_effort` values map onto the model's levels. Before, `high` returned
+  HTTP 500.
+- **New in the engine:** the Responses API, `/v1/responses`, with streaming, function tools, reasoning and
+  `previous_response_id`.
+- **New in the manager:**
+  - loads the model on demand;
+  - queues requests: one runs at a time, and up to 8 wait;
+  - OpenAI-style errors;
+  - `/v1/models` without loading the model;
+  - speed stats.
+- **Not supported:** embeddings, images, audio and Anthropic's `/v1/messages`.
 
-**Setup that detects the platform** ([`setup/`](setup), [`qwenflash/setup.py`](qwenflash/setup.py)):
-
-- **Windows:** installs WSL 2, sets the `.wslconfig` memory limit, and installs Ubuntu 24.04 on a chosen drive.
-- **Both platforms:**
-  1. build tools + CUDA 12.8;
-  2. the engine checkout and its Python environment;
-  3. GPU kernels built for the local card;
-  4. the 3.05 and 4.05 bpw models.
-- Every step runs from the Setup tab or from a terminal (`qwenflash setup STEP`).
-
-**Sizing and presets** ([`sizing.py`](sizing.py)):
-
-- **The VRAM/RAM model:** the fixed footprint, the KV cache per token, the prefill chunk and staging, the expert
-  cache slots and the RAM cache. It was calibrated from measured runs.
-- **[`run.sh`](run.sh):** starts the server sized for whatever card it finds.
-- **[`bin/qwenflash-backend`](bin/qwenflash-backend):** runs the server detached as a transient systemd unit
-  (system or `--user`), with raised file and locked-memory limits.
-- **Presets:** quant, context, RAM cache and the manager's RAM thresholds from VRAM + RAM + platform. A new install
-  starts from the preset, and the dashboard offers it when your settings differ. The README's preset matrix and
-  measured table are generated from this code, and a test fails if the README drifts.
-
-**Benchmarks and research** ([`bench/`](bench), [`research/`](research)):
-
-- A VRAM-scaling matrix for 8-32 GB cards (engine capped on the 5090), with raw results and a report.
-- The earlier RTX 5090 + WSL2 results.
-- [Multi-GPU notes](docs/research/multi-gpu.md).
-
-**Tests** ([`tests/`](tests)): sizing and presets, the manager's config and planning, the OpenAI request
-mapping and the Responses translation, alongside upstream's tests.
-
-## The API: what's original and what's new
-
-**From the original (MaxDevv).** The OpenAI-compatible server: `qwen_server.py`, which runs `qwen38/serve.py` on
-port 30000. It has:
-- `POST /v1/chat/completions`: streaming, function calling, and reasoning effort on the model's own scale (off,
-  low, medium, xhigh);
-- `POST /v1/completions`, the older raw-prompt endpoint;
-- `GET /v1/models`;
-- `/generate`, `/tokenize`, `/server_info` and `/stats`, for benchmark and diagnostic tools.
-
-**Fixed in the engine:**
-- **`reasoning_effort` mapping** ([`openai_compat.py`](qwen38-flash-offload/qwen38/openai_compat.py)). OpenAI's
-  `minimal`, `low`, `medium`, `high`, `max` and `none` map onto the model's levels. Before, `high` crashed the
-  chat template with HTTP 500, which is what Hermes Agent hit.
-
-**Added in the engine:**
-- **The Responses API**, `POST /v1/responses` ([`openai_responses.py`](qwen38-flash-offload/qwen38/openai_responses.py)).
-  It's OpenAI's newer API, used by the Agents SDK and Codex-style clients. It runs on the same pipeline as chat:
-  - streaming, with the standard Responses events;
-  - function tools;
-  - reasoning items;
-  - `previous_response_id`, kept in memory for the last 64 responses.
-
-  Chat and Responses now share one generation path. Every event type validates against the official SDK's models.
-
-**Added by the manager**, which sits in front of the engine: it takes port 30000 and moves the engine behind it
-to 30001.
-- **Loads on demand:** a request to a paused model starts it and waits while it loads.
-- **A queue:** one request generates at a time, and up to 8 wait.
-- **OpenAI-style errors:** 503 when it can't start, 502 when unreachable, 400 when the context is full.
-- **`/v1/models` without loading the model**, and any model name is accepted.
-- **Speed and token counts** on the dashboard, measured on streamed requests (chat and Responses).
-- **The dashboard's control API** (`/_switcher/api/...`). It is loopback only, and not OpenAI.
-- **[docs/api.md](docs/api.md)**, tested with the official `openai` Python SDK.
-
-**Still not supported:** embeddings, images and audio, and Anthropic's `/v1/messages`.
+Details are in [docs/api.md](docs/api.md).
 
 ## Changes to upstream files
 
-Only a few upstream files changed. Everything else is new.
+Everything not listed here is new. Defaults are unchanged unless the new environment variables are set.
 
-| File | Change |
+| File (`qwen38/` is `qwen38-flash-offload/qwen38/`) | Change |
 |---|---|
-| `qwen38-flash-offload/qwen38/nv2.py`, `nv_tier.py`, `k_lookahead.py`, `exl3_tiers.py` (+ new `wsl_pinned.py`) | Pinned host memory works under WSL2 (details in the table below). |
-| `qwen38-flash-offload/qwen38/expert_cache.py` | A prefill stage holds a whole layer, so 4.05 bpw no longer overflows the 1.1 GiB default. |
-| `qwen38-flash-offload/qwen38/serve.py` (+ new `openai_compat.py`) | OpenAI `reasoning_effort` values are mapped onto the template's levels. |
-| `qwen_offload.py` | VRAM and torch-allocator limits are configurable; kernels build for the local GPU's architecture instead of 8.9. |
-| `memory_guard.py` | Guard limit is configurable; the RAM guard turns off with a message when there is no memory cgroup, instead of crashing. |
-| `qwen_server.py` | The prefill chunk can come from `QWEN_CHUNK` (default unchanged, 24576). |
-| `download_http.py` | `--branch` and `--sha` fetch other quants (e.g. 4.05 bpw). |
-| `.gitignore`, new `.gitattributes` | The allow-list includes the fork's files; files that run inside Linux keep LF endings on Windows checkouts. |
-| `README.md` | Fork notice, differences table, credit, the fork's setup section with presets and measurements, requirements, To-Do status. Upstream's text is otherwise kept (its intro under *About the engine*). |
-
-Every default is unchanged unless the new environment variables are set.
+| `qwen38/nv2.py`, `nv_tier.py`, `k_lookahead.py`, `exl3_tiers.py` (+ `wsl_pinned.py`) | Pinned host memory works under WSL2 |
+| `qwen38/expert_cache.py` | Prefill staging holds a whole layer, so 4.05 bpw fits |
+| `qwen38/serve.py` (+ `openai_compat.py`, `openai_responses.py`) | `reasoning_effort` mapping; the Responses API |
+| `qwen_offload.py` | Configurable VRAM limits; kernels built for the local GPU |
+| `memory_guard.py` | Configurable limit; no crash without a memory cgroup |
+| `qwen_server.py` | Prefill chunk from `QWEN_CHUNK` |
+| `download_http.py` | `--branch` and `--sha`, to fetch 4.05 bpw |
+| `.gitignore` (+ `.gitattributes`) | The fork's files; LF endings for scripts that run in Linux |
+| `README.md` | Rewritten for the fork; the original's intro, benchmarks and manual install are kept |
 
 ## Taking changes upstream
 
-The first six commits are engine fixes. Each stands on its own and cherry-picks onto upstream `master`:
+These six commits each stand alone and cherry-pick onto upstream `master`:
 
-| Commit | What | Why |
-|---|---|---|
-| `96decf0` | Keep LF endings for files that run inside Linux (`.gitattributes`) | A Windows checkout used from WSL otherwise gets CRLF shell scripts |
-| `851da0e` | `QWEN_VRAM_LIMIT_BYTES`, `QWEN_TORCH_LIMIT_BYTES`, `QWEN_VRAM_GUARD_BYTES` | Cards with more than 16 GB can give the expert cache more room; defaults unchanged |
-| `58e8b65` | `cudaHostAlloc` when registered host memory isn't identity-mapped | Needed for WSL2. There `cudaHostRegister` memory gets a different device address, and the kernels dereference raw host addresses. Bare-metal Linux keeps the old path; `QWEN_PINNED_HOSTALLOC=1/0` forces either |
-| `4f837dc` | `download_http.py --branch/--sha` | Fetch the 4.05 bpw quant |
-| `b0d7045` | Map OpenAI `reasoning_effort` (`minimal/low/medium/high/max/none`) onto the template's `low/medium/xhigh`, and accept `reasoning.effort` | Clients sending `high` got HTTP 500 |
-| `b3f6e8d` | Prefill staging sized per layer; `TORCH_CUDA_ARCH_LIST` from the local GPU; RAM guard without a cgroup | The 4.05 bpw first prefill asserted; non-Ada cards built for the wrong architecture; WSL has no memory cgroup at the root |
+| Commit | What |
+|---|---|
+| `59ca8ce` | LF endings for files that run inside Linux, so Windows checkouts used from WSL work |
+| `e3ae7c2` | `QWEN_VRAM_LIMIT_BYTES`, `QWEN_TORCH_LIMIT_BYTES` and `QWEN_VRAM_GUARD_BYTES`, so cards over 16 GB get more cache |
+| `f05f734` | `cudaHostAlloc` when registered host memory isn't identity-mapped, which WSL2 needs |
+| `2f2401c` | `download_http.py --branch/--sha` |
+| `0f7740f` | OpenAI `reasoning_effort` values; `high` returned HTTP 500 |
+| `5e0167e` | Prefill staging sized per layer; kernels for the local GPU; the RAM guard without a cgroup |
 
 ```bash
 git remote add eltorr https://github.com/eltorr/lean-qwenflash.git
 git fetch eltorr
-git cherry-pick 96decf0 851da0e 58e8b65 4f837dc b0d7045 b3f6e8d
+git cherry-pick 59ca8ce e3ae7c2 f05f734 2f2401c 0f7740f 5e0167e
 ```
 
-The rest builds up in layers, each depending on the one before:
-
-1. `sizing.py` + `run.sh` + `bin/` (`43f16ff`);
-2. setup steps (`33d0cef`);
-3. the manager (`7529989` and later);
-4. benchmarks (`ae91513`, `48757bb`);
-5. presets (`e1eb221`).
-
-`sizing.py` and `run.sh` are useful without the manager: `./run.sh server` starts a server sized for the card.
-
-<details>
-<summary>All commits on top of upstream</summary>
-
-| Commit | Change |
-|---|---|
-| `96decf0` | Keep LF line endings for files that run inside Linux |
-| `851da0e` | Make the VRAM, torch-allocator and guard limits configurable |
-| `58e8b65` | Allocate pinned host memory with cudaHostAlloc when registered memory is not identity-mapped |
-| `4f837dc` | download_http: add --branch and --sha to fetch other quants |
-| `b0d7045` | Accept OpenAI reasoning_effort levels in the chat endpoint |
-| `b3f6e8d` | Size prefill staging per layer, build for the local GPU, tolerate missing cgroups |
-| `43f16ff` | Add sizing.py, a hardware-sized launcher (run.sh) and a detached backend runner |
-| `33d0cef` | Add setup steps that run on native Linux and inside WSL2 |
-| `7529989` | Add the QwenFlash manager: dashboard, OpenAI front door and model lifecycle for Windows+WSL2 and Linux |
-| `793701c` | 20_env: check an existing Python environment by its files instead of importing torch |
-| `1c148b0` | Keep the detached server alive under WSL; stop retrying a failed start forever |
-| `40bf4af` | Run the detached model server as a transient systemd service where available |
-| `7a11bb5` | Give the systemd-run server the caller's PATH and HOME; find WSL's nvidia-smi in run.sh |
-| `aa91316` | Lift the server unit's open-file and locked-memory limits |
-| `da97c77` | Learn the model's real RAM overhead, ignore RAM dips right after a start, keep a manual lean |
-| `ae91513` | Add the VRAM scaling benchmark: a CUDA-driver ballast and a matrix runner |
-| `d421020` | Docs and launcher for the integrated manager; keep the earlier RTX 5090 results in research/ |
-| `373f47f` | Multi-GPU notes: reflect run.sh's GPU pinning and per-GPU builds; matrix: forced staging-free runs |
-| `48757bb` | Benchmark smaller cards by capping the engine instead of a ballast; table generator |
-| `a681130` | Recalibrate sizing from the VRAM scaling runs; enough prefill reserve on small cards |
-| `aad8cf6` | sizing: measured activation size and a fragmentation margin before choosing staging |
-| `b8bd081` | VRAM scaling report: 8-32 GB cards; README requirements, numbers and To-Do status |
-| `6a1071b` | Grow a full model's RAM cache when RAM frees up |
-| `e1eb221` | Presets: a baseline configuration from VRAM + RAM, shared by the manager and the README |
-
-</details>
-
-## Status
-
-The README's [Tested so far](README.md#tested-so-far) has the full picture with numbers. In short:
-
-- **Windows 11 + WSL2, RTX 5090:** in daily use. Both quants run at 256K context; the 4.05 bpw full profile holds
-  every expert in VRAM + RAM.
-- **Native Linux:** the manager and dashboard were checked inside WSL, acting as a Linux host. So were setup status,
-  first-run presets, and the `systemd --user` backend as a normal user. A model start on a bare-metal Linux box
-  hasn't been done yet.
-- **Not tested:** real 8-24 GB cards (the numbers come from a capped 5090), Turing (RTX 20) cards, and more RAM with
-  less VRAM (e.g. 128 GB with a 24 GB card). That last one is next.
-- **Not supported:** two GPUs. The offload layer pins one GPU; see the [notes](docs/research/multi-gpu.md).
+The rest builds in layers: sizing and `run.sh`, then setup, the manager, benchmarks, and presets.
+`./run.sh server` is useful on its own: it starts a server sized for the card.
 
 ## Branches
 
-- `qwenflash` (default): this fork.
-- `master`: upstream as it was when forked. To pick up new upstream work:
-  `git fetch upstream && git merge upstream/master` on `qwenflash`, after adding upstream as a remote:
-  `git remote add upstream https://github.com/MaxDevv/lean-qwenflash.git`.
+- **`qwenflash`** (default): this fork.
+- **`master`:** upstream as forked. To pull in new upstream work:
 
-![Settings tab](docs/images/dashboard-settings.png)
+  ```bash
+  git remote add upstream https://github.com/MaxDevv/lean-qwenflash.git
+  git fetch upstream
+  git merge upstream/master
+  ```

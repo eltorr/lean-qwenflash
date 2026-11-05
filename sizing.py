@@ -367,15 +367,15 @@ def presets_table(platform="linux"):
 
 def measured_table():
     """The README's measurement chart (between <!-- measured:begin/end -->), from MEASURED."""
-    lines = ["| Card (VRAM) | Quant | Context | RAM cache | Prefill | Decode | Measured on | Details |",
-             "|---" * 8 + "|"]
+    lines = ["| Card (VRAM) | Quant | Context | RAM cache | Prefill | Decode | Measured on |",
+             "|---" * 7 + "|"]
     for m in sorted(MEASURED, key=lambda m: (m["quant"], -m["card"], m.get("capped", False), m["context"],
                                              m["ram_cache_gib"])):
         ctx = _ctx(m["context"]) + ("" if m.get("staging", True) else ", no staging")
         lines.append(f"| **{_card_name(m['card'], m.get('display', True))}** | {m['quant']} | {ctx} | "
                      f"{m['ram_cache_gib']} GiB | {m['prefill']:,} tok/s | {m['decode']} tok/s | "
-                     f"{measured_on(m)}, {m['ram']} GB RAM, {PLATFORMS[m['platform']]} | "
-                     f"[report]({m['source']}/REPORT.md) |")
+                     f"[{measured_on(m)}]({m['source']}/REPORT.md), {m['ram']} GB RAM, "
+                     f"{PLATFORMS[m['platform']]} |")
     return "\n".join(lines)
 
 

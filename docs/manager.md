@@ -1,160 +1,110 @@
 # QwenFlash manager
 
-The manager runs next to the engine and makes it a service:
+The manager runs the model as a service on a PC that is also used for other things, such as gaming, and adapts the
+model's resources to them:
 
-- **One endpoint:** an OpenAI-compatible API (Chat Completions and Responses) on `http://127.0.0.1:30000/v1`. An
-  Ollama-style front door on port 11434 is optional, for replacing an Ollama install. See [api.md](api.md).
-- **The model loads when called and makes room for other apps.** It sizes the model to the free VRAM and RAM,
-  scales it back or pauses it when games or other GPU apps need the card, and re-saturates when they're done.
-- **A local web dashboard** to watch and control all of it: state, speed, GPU/RAM use, setup and logs.
-- **Setup for both platforms:** native Linux, or Windows with the engine inside WSL2. It detects which, checks the
-  hardware, and runs each step.
+- **One endpoint:** an OpenAI-compatible API on `http://127.0.0.1:30000/v1` ([api.md](api.md)).
+- **Shares the GPU:**
+  - loads the model when a client calls it;
+  - sizes it to the free VRAM and RAM;
+  - scales it back or pauses it when games or other GPU apps need the card;
+  - comes back to full when they're done.
+- **A local dashboard** shows the state, speed, GPU and RAM use, setup and logs.
+- **Setup** for native Linux, or Windows with the engine in WSL2.
 
-The manager itself is plain Python (only `psutil`, plus `pywin32` on Windows) and never touches the GPU. The model
-server it controls is the engine in this repo, started through `run.sh`.
+The manager is plain Python (`psutil`, plus `pywin32` on Windows) and never touches the GPU itself.
 
 ## Start it
 
 | | Windows (engine in WSL2) | Linux |
 |---|---|---|
-| Start the service and open the dashboard | double-click `QwenFlash.cmd` (or the desktop shortcut) | `./qwenflash.sh open` |
+| Start and open the dashboard | double-click `QwenFlash.cmd` | `./qwenflash.sh open` |
 | Run in the foreground | `.venv\Scripts\python -m qwenflash serve` | `./qwenflash.sh` |
-| Start at login | Settings: *Start the service when I sign in to Windows* | Settings: *Start at login* (a systemd user service) |
+| Start at login | Settings: *Start the service when I sign in to Windows* | Settings: *Start at login* |
 
-The first start creates the manager's small Python environment (`.venv` on Windows, `.venv-manager` on Linux).
-Then open the **Setup** tab. It shows what was detected and recommends settings for the machine. Run the steps
-top to bottom; each one can be re-run safely.
-
-The same is available from a terminal, which helps on headless servers:
+From a terminal, which helps on headless machines:
 
 ```
-qwenflash detect          platform, GPU (VRAM, architecture, PCIe link), CPU, RAM, WSL, engine, recommendations
-qwenflash setup           list the setup steps and their status
-qwenflash setup build     run one step here, with its output
-qwenflash plan            this machine's preset, and the VRAM/RAM plan at each quant (sizing.py)
-qwenflash status          what the running service is doing (add --json for everything)
+qwenflash detect          platform, GPU, CPU, RAM, WSL, engine and recommendations
+qwenflash setup           the setup steps and their status
+qwenflash setup STEP      run one step: wsl, wslconfig, distro, driver, base, engine, build, m305, m405
+qwenflash plan            this machine's preset, and what fits at each quant
+qwenflash status          what the service is doing (--json for everything)
 ```
 
-On Windows, run these as `.venv\Scripts\python -m qwenflash ...`; on Linux, `./qwenflash.sh ...`.
+On Windows, run these as `.venv\Scripts\python -m qwenflash ...`; on Linux, as `./qwenflash.sh ...`.
 
 ## Setup
 
 | Step | Windows + WSL2 | Linux |
 |---|---|---|
-| WSL 2 | installs or updates WSL (asks for administrator approval; a first install needs a restart) | - |
-| WSL memory limit | writes `%USERPROFILE%\.wslconfig` so WSL may use most of the RAM (its default is half); keeps your other settings | - |
-| Ubuntu 24.04 | installs the distro on the drive you choose (default: the fixed drive with most free space), with systemd | - |
-| NVIDIA driver | - (the Windows driver serves WSL) | checked only: installing one needs a reboot, so it shows the commands |
-| Build tools + CUDA 12.8 | inside WSL, from NVIDIA's WSL repository | from NVIDIA's repository for your Ubuntu/Debian release; uses `sudo` (if it needs a password, the step prints the command to run) |
-| Engine + Python environment | makes the engine directory inside WSL a clone of this checkout and updates it to this checkout's commit (local changes there are stashed, never lost) | uses this checkout |
-| Compile GPU kernels | for the GPU's own architecture (sm_75 Turing to sm_120 Blackwell) | same |
-| Models | 3.05 bpw (~85 GB download + ~47 GB store) and/or 4.05 bpw (~107 GB + ~62 GB); resumable | same |
+| WSL 2 | installs WSL; needs administrator approval, and a first install needs a restart | - |
+| WSL memory limit | lets WSL use most of the RAM (`.wslconfig`) | - |
+| Ubuntu 24.04 | installs the distro on the drive you pick, with systemd | - |
+| NVIDIA driver | - | checks it, and shows the install commands if it's missing |
+| Build tools + CUDA 12.8 | inside WSL | uses `sudo`, or prints the command to run |
+| Engine + Python environment | a clone of this checkout inside WSL, at the same commit | this checkout |
+| Compile GPU kernels | for the local GPU (Turing to Blackwell) | same |
+| Models | 3.05 bpw (~85 GB download + 47 GB store) or 4.05 bpw (~107 + 62 GB); downloads resume | same |
 
-**Engine sync (Windows):** the manager runs from this checkout on Windows, while the engine runs from a clone inside
-WSL.
-- The header shows both commits.
-- After you commit a change here, *Engine + Python environment* shows **Update available**; running it brings the
-  WSL clone to the same commit.
-- Only committed code is synced.
+On Windows, when you commit a change here, *Engine + Python environment* shows **Update available**. Running it
+again syncs the WSL clone; only committed code is synced.
 
-**Recommendations:** the Setup tab compares the machine with what the model needs. For example:
-- the baseline for this card, RAM and platform: quant, context, RAM cache and the manager's RAM thresholds (the
-  [presets](../README.md#presets-a-baseline-from-vram-and-ram)). A new install starts from it; later it is offered
-  when your settings differ
-- the context window that fits this GPU
-- whether every expert fits in VRAM + RAM, or some will be read from NVMe
-- a PCIe link below Gen4 x16
-- WSL limited to half the RAM
-- a filesystem without O_DIRECT
-- several GPUs (the engine uses GPU 0; see [research/multi-gpu.md](research/multi-gpu.md))
+## How it shares the GPU
 
-Recommendations that suggest a setting have an *Apply* button.
-
-## How it sizes and switches the model
-
-The model's VRAM use has two parts:
-- **A fixed part:** about 6.2 GB (3.05 bpw) or 6.6 GB (4.05) plus the KV cache: 9.0-9.4 GB at 256K context.
-- **An expert cache** that takes whatever budget is left.
-
-[`sizing.py`](../sizing.py) turns a VRAM budget into a plan: cache size, prefill chunk (smaller on small cards),
-and whether prefill staging fits. The manager and `run.sh` both use it.
-
-| Profile | VRAM budget | RAM cache | When |
+| Profile | VRAM | RAM cache | When |
 |---|---|---|---|
-| **Full** | everything free, minus headroom (~10% of the card, 1.2-3.2 GB; 0.6 GB minimum on a card without a display) | enough for every expert that isn't in VRAM, shrunk to what the host can spare | nothing else needs the GPU |
-| **Lean** | about half the card (16 GB on a 32 GB card), never less than the context needs | `lean_ram_gb` (8 GiB) | other apps need VRAM or RAM (moderate pressure) |
-| **Paused** | 0 | 0 | a watched program runs, or VRAM/RAM is critically short (heavy pressure) |
+| **Full** | all that's free, minus ~10% headroom | every expert that isn't in VRAM, as far as RAM allows | nothing else needs the GPU |
+| **Lean** | about half the card | 8 GiB | a game or another app needs VRAM or RAM |
+| **Paused** | 0 | 0 | a watched program runs, or VRAM or RAM is critically short |
 
-**Pressure:**
-- **VRAM:** other apps use more than a quarter of the card, or grow into the model's free memory.
-- **RAM:** free RAM drops below `ram_lean_gb`.
-- **GPU busy:** another app keeps the GPU at or above `ext_util_pct`.
+- **Scaling back:** happens between requests, after about 10 s of pressure.
+- **Pausing:** happens about 3 s into heavy pressure, once the current request finishes (2 minutes at most).
+- **Coming back:**
+  - A paused model wakes on the next request.
+  - A lean model returns to full after the GPU has been clear for 30 s.
+- **Your choice wins:** *Start lean* stays lean until you start full. A request made under pressure wakes the model
+  lean and holds off auto-switching for 5 minutes.
+- **Thresholds:** all are in Settings, scaled to the card; 0 means automatic.
 
-Thresholds scale with the card. Each is a setting, where 0 means automatic.
+[`sizing.py`](../sizing.py) turns a VRAM budget into a plan: the expert cache, the prefill chunk, and whether
+staging fits.
 
-**Switching:**
-- **Scaling back** waits ~10 s of sustained pressure and happens between requests.
-- **Pausing** happens ~3 s into heavy pressure, after the request in progress (or after 2 minutes at most).
-- **Re-saturating:** a paused model wakes on the next request. A lean model returns to full once the GPU has been
-  clear for 30 s, between requests, even with an agent sending requests non-stop.
-- **Your choice wins:**
-  - *Start lean* from the dashboard stays lean until you start full.
-  - Calling the model under pressure wakes it lean and holds off auto-switching for 5 minutes.
+**Recovery:**
 
-### Robustness
-
-- **The model survives manager restarts.** The engine runs detached: as the transient systemd service
-  `qwenflash-backend` where systemd runs (WSL, most Linux machines), otherwise in its own session. A new manager
-  adopts it instead of restarting it, and *Quit, keep model* leaves it running on purpose.
-- **Crashes recover.** The manager notices a dead server within ~10 s and restarts it after 10 s, 30 s and 90 s.
-  After three failures in 10 minutes it stops and shows the error.
-- **It learns from out-of-memory crashes.** If the server ran out of VRAM, the next start uses a budget 2 GB
-  smaller. If it ran out of RAM, the RAM cache shrinks by 4 GiB. These learned limits apply per GPU, quant and
-  context; *Settings > Forget learned limits* clears them.
-- **It measures RAM use.** 90 s after each start, the manager measures the RAM the model uses beyond its expert cache
-  and sizes later starts with that figure. RAM dips in the first 90 s after a start (page cache being handed back,
-  slow under WSL) don't count as pressure.
-
-### Speed
-
-The dashboard shows the generation speed, prompt speed and time to first token of recent requests, measured as
-they pass through the manager. `GET /_switcher/api/metrics` lists the last 100.
+- **Model kept running:** the model runs detached, so restarting the manager doesn't stop it.
+- **Crashes:** a crashed model is restarted after 10 s, 30 s and 90 s. After three failures in 10 minutes, the
+  manager stops and shows the error.
+- **Out of memory:**
+  - VRAM: the next start uses 2 GB less.
+  - RAM: the RAM cache shrinks by 4 GiB.
+  - *Settings > Forget learned limits* clears these.
 
 ## Where things are
 
 | Path | What |
 |---|---|
-| `qwenflash/` | the manager: `service.py` (lifecycle, API), `host.py` (Windows+WSL2 / Linux), `hardware.py`, `setup.py`, `nvml.py`, `ui/` |
-| `sizing.py` | the VRAM/RAM model shared by the manager, `run.sh` and the engine |
-| `run.sh` | launches the engine on any NVIDIA GPU, sized from the hardware unless told otherwise |
-| `bin/qwenflash-backend` | starts/stops the engine detached; its log is `.qwenflash/backend.log` in the engine checkout |
-| `setup/` | the Linux-side steps, shared by both platforms |
-| `bench/` | `vram_ballast.py` (hold VRAM: emulate a smaller card, or play "another app") and `vram_matrix.py` |
-| settings and logs | Windows `%LOCALAPPDATA%\QwenFlash`, Linux `~/.local/state/qwenflash` (`config.json`, `learned.json`, `logs/`) |
+| `qwenflash/` | the manager: `service.py`, `host.py` (Windows + WSL2 or Linux), `hardware.py`, `setup.py`, `ui/` |
+| `sizing.py` | the VRAM and RAM model, shared by the manager and `run.sh` |
+| `run.sh` | starts the engine, sized from the hardware |
+| `bin/qwenflash-backend` | runs the engine detached (a systemd unit where available) |
+| `setup/` | the install steps, shared by both platforms |
+| settings and logs | Windows `%LOCALAPPDATA%\QwenFlash`, Linux `~/.local/state/qwenflash` |
 
-## Remote dashboards
+## Other machines
 
-The dashboard and control API listen on `127.0.0.1` only. If you set `listen_host` to another address (for
-example, a headless Linux server), the manager creates a `dashboard_token` in `config.json`; open the dashboard
-once with `?token=<token>` and the browser remembers it. The OpenAI API itself does not check keys, like Ollama.
-Over SSH, a tunnel (`ssh -L 30000:127.0.0.1:30000 host`) keeps everything on loopback instead.
+The dashboard and API listen on `127.0.0.1` only.
 
-## Replacing Ollama on a tailnet (Windows example)
+- **Dashboard over SSH:** `ssh -L 30000:127.0.0.1:30000 host`.
+- **API for other devices:**
+  1. Turn on the API-only port: set `"ollama_alias_port": 11434` in `config.json` and restart the service. This
+     port serves the OpenAI API but never the dashboard.
+  2. Expose the port, for example on a tailnet:
 
-This PC serves the tailnet in place of Ollama. The front door is off by default.
+     ```
+     tailscale serve --bg --tcp=11434 tcp://127.0.0.1:11434
+     ```
 
-- **Turn it on:** set `"ollama_alias_port": 11434` in `config.json` (`%LOCALAPPDATA%\QwenFlash` on Windows,
-  `~/.local/state/qwenflash` on Linux), quit Ollama or move it to port 11435, and restart the service.
-- **Address:** QwenFlash then answers on Ollama's port, 11434, through its front door. Other devices keep using
-  `http://<tailnet-host>:11434/v1`.
-- **Exposure:** `tailscale serve --bg --tcp=11434 tcp://127.0.0.1:11434`. Check it with `tailscale serve status`;
-  turn it off with `tailscale serve --tcp=11434 off`.
-  - It uses TCP mode because HTTP mode answers only requests whose Host header is the machine's own name, and
-    returns 404 for the raw tailnet IP or a proxy that rewrites the hostname.
-- **Old clients keep working:** chat requests for any model name are answered by QwenFlash, including Ollama
-  names such as `qwen3.8`.
-- **Ollama-only features return 404:** embeddings, images, Ollama's `/api/*`, and Anthropic `/v1/messages`.
-  `GET /` answers `QwenFlash is running` for health checks.
-- **Running Ollama alongside:** start it with `OLLAMA_HOST=127.0.0.1:11435`. The front door then passes
-  embeddings, `/api/*` and requests for its installed models through to it.
-- **The dashboard never leaves the machine:** the front door doesn't serve it or the control API.
+  3. Clients use `http://<tailnet-host>:11434/v1`.
+- **Dashboard without SSH:** set `listen_host` in `config.json`. This needs the `dashboard_token` the manager then
+  creates, given once as `?token=...`.
