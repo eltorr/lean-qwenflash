@@ -14,6 +14,7 @@ running out of VRAM or RAM lowers that budget for next time ("learned limits").
 import asyncio
 import collections
 import hmac
+import ipaddress
 import json
 import math
 import re
@@ -28,7 +29,8 @@ import urllib.parse
 from . import config
 from .config import GB, GIB, LOG_DIR, REPO, SERVED_NAME, SERVICE_KEYS, log
 from .host import make_host
-from .httpio import (StreamStats, backend_request, close, http_ok, oai_error, pipe, read_request, respond)
+from .httpio import (BACKEND_KEY_HEADER, HTTPError, StreamStats, backend_request, close, http_ok, oai_error, pipe,
+                     read_body, read_head, respond)
 from .setup import Setup
 
 sys.path.insert(0, str(REPO))
@@ -39,7 +41,11 @@ import sizing  # noqa: E402
 RAM_OVERHEAD = sizing.RAM_OVERHEAD
 RAM_GRACE_S = 90                 # after a start, page cache from loading takes a while to be handed back
 UI_FILE = REPO / "qwenflash" / "ui" / "index.html"
-SIGNIN_FILE = REPO / "qwenflash" / "ui" / "signin.html"   # the network port's root without the private link
+SIGNIN_FILE = REPO / "qwenflash" / "ui" / "signin.html"   # the root without the private link
+PAGES = ("/", "/_switcher", "/_switcher/", "/_switcher/index.html")
+COMPLETIONS = ("/v1/chat/completions", "/v1/responses", "/v1/completions")
+# actions other devices may not take, even with the private link
+LOCAL_ONLY_ACTIONS = {"quit", "quit_keep_model", "autostart_on", "autostart_off", "new_remote_link"}
 OOM_VRAM = re.compile(r"out of memory|OutOfMemoryError|VRAM LIMIT EXCEEDED|Insufficient VRAM|cudaErrorMemoryAllocation",
                       re.I)
 OOM_RAM = re.compile(r"RAM LIMIT EXCEEDED|MemoryError|Killed\b|oom-kill", re.I)
@@ -76,7 +82,7 @@ class Monitor(threading.Thread):
                     self.latest = s
             except Exception as e:  # noqa: BLE001 - keep monitoring through transient counter errors
                 log.warning("monitor sample failed: %s", e)
-            time.sleep(self.svc.cfg["poll_s"])
+            time.sleep(max(0.5, self.svc.cfg["poll_s"]))
 
     def get(self):
         with self.lock:
@@ -114,6 +120,9 @@ class Service:
         self.learned = config.load_json("learned.json", {})
         self.quit = None
         self.front_server, self._front_warned = None, False
+        # only this manager may call the model server: it sends this key, which the server checks
+        self.backend_key = config.secret("backend.key")
+        self.backend_auth = {BACKEND_KEY_HEADER: self.backend_key}
 
     def _gpu_display(self):
         from .hardware import has_display
@@ -274,10 +283,11 @@ class Service:
     def profile_env(self, tier, m, plan):
         cfg = self.cfg
         env = {"QUANT": cfg["quant"], "CONTEXT": str(cfg["context"]), "PORT": str(cfg["backend_port"]),
-               # WSL forwards Windows' localhost to sockets bound on all interfaces inside the VM
-               "HOST": "0.0.0.0" if self.host.kind == "windows-wsl" else "127.0.0.1",
+               # loopback only: WSL forwards Windows' localhost to it, and nothing else on the VM's network reaches it
+               "HOST": "127.0.0.1",
                # the manager handles contention; never let the in-process guard hard-kill a request
-               "QWEN_VRAM_GUARD_BYTES": str(int(m["vram_total"] + 2 * GB))}
+               "QWEN_VRAM_GUARD_BYTES": str(int(m["vram_total"] + 2 * GB)),
+               "QWENFLASH_BACKEND_KEY": self.backend_key}
         capped = tier == "lean" or bool(self.learned.get(self.learned_key(), {}).get("vram_cap"))
         if tier == "full" and not capped:
             env["QWEN_VRAM_LIMIT_BYTES"] = str(int(m["vram_total"] - self.headroom(m)))
@@ -334,7 +344,7 @@ class Service:
             await asyncio.to_thread(host.backend_stop)
             self.event("cleanup", "stopped a model server that was not started by this service")
         for _ in range(30):
-            if not await asyncio.to_thread(http_ok, url, 1.0):
+            if not await asyncio.to_thread(http_ok, url, 1.0, self.backend_auth):
                 break
             await asyncio.sleep(1)
         if host.follower:
@@ -347,7 +357,7 @@ class Service:
         self.save_backend_meta(env)
         alive_t = 0.0
         while time.time() - t0 < cfg["start_timeout_s"]:
-            if await asyncio.to_thread(http_ok, url):
+            if await asyncio.to_thread(http_ok, url, 2.0, self.backend_auth):
                 self.be.startup_s = time.time() - t0
                 self.be.ready_at = time.time()
                 self.be.set("running")
@@ -404,7 +414,8 @@ class Service:
             "pid": self.be.pid, "tier": self.be.tier, "quant": self.be.quant, "context": self.be.context,
             "ram_gib": self.be.ram_gib, "budget": self.be.budget, "own_vram": self.be.own_vram,
             "started": self.be.since, "ready_at": self.be.ready_at, "startup_s": self.be.startup_s,
-            "engine_dir": self.host.engine_dir, "port": self.cfg["backend_port"], "env": env,
+            "engine_dir": self.host.engine_dir, "port": self.cfg["backend_port"],
+            "env": {k: v for k, v in env.items() if k != "QWENFLASH_BACKEND_KEY"},
             "plan": {k: v for k, v in (self.be.plan or {}).items() if isinstance(v, (int, float, str, bool))}})
 
     async def stop(self, reason, paused_reason="manual"):
@@ -456,7 +467,7 @@ class Service:
         meta = config.load_json("backend.json", None)
         url = f"http://127.0.0.1:{cfg['backend_port']}/v1/models"
         if self.observe:
-            if await asyncio.to_thread(http_ok, url):
+            if await asyncio.to_thread(http_ok, url, 2.0, self.backend_auth):
                 self.be.set("running")
                 self.be.tier = (meta or {}).get("tier") or "unknown"
                 m = await self.fresh_sample(0)
@@ -465,7 +476,8 @@ class Service:
                     self.ext_at_start, self.perproc_at_start = min(m["vram_used"], m["perproc_ded"]), m["perproc_ded"]
                 self.event("observe", "observe mode: a model server is answering on the backend port")
             return
-        if st == "running" and meta and meta.get("pid") == pid and await asyncio.to_thread(http_ok, url, 3.0):
+        answering = st == "running" and await asyncio.to_thread(http_ok, url, 3.0, self.backend_auth)
+        if answering and meta and meta.get("pid") == pid:
             m = await self.fresh_sample(0)
             b = self.be
             b.pid, b.tier, b.quant, b.context = pid, meta["tier"], meta["quant"], meta["context"]
@@ -589,7 +601,7 @@ class Service:
                 await respond(writer, 502, oai_error(f"model server unreachable: {e}", "bad_gateway", 502))
                 return
             t_send = time.time()
-            bw.write(backend_request(method, target, headers, body, cfg["backend_port"]))
+            bw.write(backend_request(method, target, headers, body, cfg["backend_port"], self.backend_key))
             await bw.drain()
             await pipe(br, writer, lambda c: stats.feed(c, time.time()))
             self.served += 1
@@ -605,11 +617,11 @@ class Service:
 
     def record_metrics(self, stats, t0, t_send, t_end, was_held):
         u = stats.usage() or {}
-        if stats.status != 200 or not u:
+        if stats.status != 200 or not isinstance(u, dict) or not u:
             return
         # chat: prompt/completion_tokens; Responses: input/output_tokens
-        pt = u.get("prompt_tokens") or u.get("input_tokens") or 0
-        ct = u.get("completion_tokens") or u.get("output_tokens") or 0
+        pt = token_count(u.get("prompt_tokens"), u.get("input_tokens"))
+        ct = token_count(u.get("completion_tokens"), u.get("output_tokens"))
         ttft = (stats.t_first - t_send) if stats.t_first else None
         decode_s = (t_end - stats.t_first) if stats.t_first else None
         self.metrics.append({
@@ -650,79 +662,97 @@ class Service:
                 self._front_warned = True
 
     # ================================================================ HTTP entry
-    def token_ok(self, headers, target):
-        """The request carries the dashboard token: ?token=, a Bearer header, or the qf_token cookie."""
+    def token_ok(self, headers, target=None):
+        """The request carries the dashboard token: the qf_token cookie, a Bearer header, or, only when opening the
+        page from the private link, ?token= in `target`."""
         tok = self.cfg["dashboard_token"]
         if not tok:
             return False
-        h = {k.lower(): v for k, v in headers}
-        given = [h.get("authorization", "").removeprefix("Bearer ").strip(), query_token(target)]
-        for part in h.get("cookie", "").split(";"):
+        given = [header(headers, "authorization").removeprefix("Bearer ").strip()]
+        if target is not None:
+            given.append(query_token(target))
+        for part in header(headers, "cookie").split(";"):
             name, _, value = part.strip().partition("=")
             if name == "qf_token":
                 given.append(value)
         return any(g and hmac.compare_digest(g.encode(), tok.encode()) for g in given)
 
-    def authorized(self, headers, target):
-        """The dashboard on the main port. Listening on loopback only, it is open to this PC's programs and browser,
-        but only for requests addressed to 127.0.0.1, localhost or ::1: a web page that points its own domain at
-        127.0.0.1 (DNS rebinding) is refused. A main port open to the network needs the token."""
-        if self.cfg["listen_host"] in LOCAL_NAMES:
-            return host_name(headers) in LOCAL_NAMES or self.token_ok(headers, target)
-        return not self.cfg["dashboard_token"] or self.token_ok(headers, target)
+    def refusal(self, method, headers, front):
+        """(status, reason) for a request refused before its body is read, else None.
+        - Main port: only requests addressed to 127.0.0.1, localhost or ::1. A web page that points its own domain at
+          127.0.0.1 (DNS rebinding) would otherwise count as this PC.
+        - Network port: a browser page must come from one of this PC's names, for the same reason.
+        - Any port: a browser request from another site (cross-site request forgery)."""
+        if not front and self.cfg["listen_host"] in LOCAL_NAMES and host_name(headers) not in LOCAL_NAMES:
+            return 403, "this port only answers requests addressed to 127.0.0.1, localhost or ::1"
+        if front and header(headers, "origin") and not self.network_origin_ok(headers):
+            return 403, "requests from other websites are refused"
+        if method not in ("GET", "HEAD") and not same_origin(headers):
+            return 403, "requests from other websites are refused"
+        return None
+
+    def network_origin_ok(self, headers):
+        try:
+            name = urllib.parse.urlsplit(header(headers, "origin")).hostname or ""
+        except ValueError:
+            return False
+        names = {*LOCAL_NAMES, socket.gethostname().lower(), self.cfg["remote_host"].lower()} - {""}
+        return name in names or is_ip(name)
 
     async def handle(self, reader, writer):
         try:
-            method, target, headers, body = await read_request(reader, writer)
-        except (asyncio.IncompleteReadError, asyncio.LimitOverrunError, ConnectionError, ValueError):
+            method, target, headers = await read_head(reader)
+        except HTTPError as e:
+            await respond(writer, e.status, {"error": str(e)})
+            close(writer)
+            return
+        except (asyncio.TimeoutError, asyncio.IncompleteReadError, asyncio.LimitOverrunError, ConnectionError):
             close(writer)
             return
         path = target.split("?", 1)[0]
         p = path.rstrip("/") or "/"
-        # The network port (also what a tailnet reaches via `tailscale serve`): /v1 is the API, and the root is the
-        # web page. The dashboard and control API answer there only with the dashboard token; without it, the root
-        # is a sign-in page that takes the private link.
+        # Every port has the same layout: /v1 is the API, and the root is the dashboard, which needs the dashboard
+        # token (the private link's cookie). Without it, the root is a sign-in page that takes the private link.
+        # The network port is the one a tailnet reaches (via `tailscale serve`); the main port is this PC only.
         front = writer.get_extra_info("sockname")[1] == self.cfg["network_port"]
-        dash = path.startswith("/_switcher") or path == "/"
-        page = path in ("/", "/_switcher", "/_switcher/", "/_switcher/index.html")
         try:
-            if method not in ("GET", "HEAD") and not same_origin(headers):
-                # a web page on another site sending a request here (cross-site request forgery)
-                await respond(writer, 403, {"error": "requests from other websites are refused"})
-                close(writer)
-            elif dash and front and self.token_ok(headers, target):
-                await self.api(method, path, target, body, writer)
-                close(writer)
-            elif front and page and method in ("GET", "HEAD"):
-                await respond(writer, 200, SIGNIN_FILE.read_bytes(), "text/html; charset=utf-8")
-                close(writer)
-            elif path.startswith("/_switcher") or (path == "/" and not front):
-                if front:
-                    await respond(writer, 401, {"error": "the dashboard needs its private link"})
-                elif not self.authorized(headers, target):
-                    await respond(writer, 401, f"QwenFlash dashboard: open it at http://127.0.0.1:"
-                                               f"{self.cfg['listen_port']}/ on this PC, or with its private link"
-                                               .encode(), "text/plain")
+            refused = self.refusal(method, headers, front)
+            if refused:
+                await respond(writer, refused[0], {"error": refused[1]})
+            elif path.startswith("/_switcher") or path == "/":
+                if self.token_ok(headers, target if path in PAGES else None):
+                    body = await read_body(reader, writer, headers, 1024 * 1024) if method == "POST" else b""
+                    await self.api(method, path, target, body, writer, local=not front)
+                elif path in PAGES and method in ("GET", "HEAD"):
+                    await respond(writer, 200, SIGNIN_FILE.read_bytes(), "text/html; charset=utf-8")
                 else:
-                    await self.api(method, path, target, body, writer)
-                close(writer)
-            elif method == "GET" and p == "/v1/models":
+                    await respond(writer, 401, {"error": "the dashboard needs its private link"})
+            elif p == "/v1/models" and method in ("GET", "HEAD"):
                 await respond(writer, 200, self.models_list())
-                close(writer)
-            elif p in ("/v1/chat/completions", "/v1/responses", "/v1/completions"):
-                # one model: any model name is answered by it
-                await self.forward(method, target, headers, body, writer)
+            elif p in COMPLETIONS:
+                if method != "POST":
+                    # a GET (an image tag on any web page) must not wake the model
+                    await respond(writer, 405, {"error": {"message": f"{path} takes POST", "type": "bad_method"}},
+                                  extra=("Allow: POST",))
+                else:
+                    body = await read_body(reader, writer, headers, 64 * 1024 * 1024)
+                    await self.forward(method, target, headers, body, writer)   # one model answers any model name
+                    return
             elif front or path.startswith("/v1/"):
                 await respond(writer, 404, {"error": {
                     "message": f"{path} is not available: this server is QwenFlash (OpenAI-compatible: "
                                f"/v1/chat/completions, /v1/responses, /v1/completions, /v1/models). Embeddings, "
                                f"images and the Anthropic /v1/messages API are not supported.",
                     "type": "not_found", "code": 404}})
-                close(writer)
             else:
                 # favicon.ico, scanners...: never wake the model for these
                 await respond(writer, 404, {"error": {"message": f"unknown path {path}", "type": "not_found"}})
-                close(writer)
+            close(writer)
+        except HTTPError as e:
+            await respond(writer, e.status, {"error": str(e)})
+            close(writer)
+        except (asyncio.TimeoutError, asyncio.IncompleteReadError, asyncio.LimitOverrunError, ConnectionError):
+            close(writer)
         except Exception as e:  # noqa: BLE001
             log.exception("request failed: %s", e)
             close(writer)
@@ -782,8 +812,10 @@ class Service:
             "setup_running": self.setup.running,
         }
 
-    async def api(self, method, path, target, body, writer):
-        if path in ("/", "/_switcher", "/_switcher/", "/_switcher/index.html"):  # the dashboard, at the root
+    async def api(self, method, path, target, body, writer, local):
+        """The dashboard and its control API, for a request carrying the token. `local`: it came in on the main port,
+        from this PC; the network port can't run setup, quit, change autostart, rotate the link or rename the PC."""
+        if path in PAGES:  # the dashboard, at the root
             tok = query_token(target)
             if tok and self.token_ok((), target):
                 # a private link: remember the token for a year, then drop it from the address bar
@@ -794,27 +826,34 @@ class Service:
             return
         try:
             data = json.loads(body or b"{}")
+            if not isinstance(data, dict):
+                raise ValueError
         except ValueError:
             await respond(writer, 400, {"error": "bad json"})
             return
         route = path[len("/_switcher/api/"):] if path.startswith("/_switcher/api/") else None
-        if route == "status":
+        if not local and ((route == "action" and data.get("action") in LOCAL_ONLY_ACTIONS) or route == "setup/run"):
+            await respond(writer, 403, {"ok": False, "message": "only on the PC itself"})
+        elif route == "status":
             await respond(writer, 200, self.status())
         elif route == "log":
             await respond(writer, 200, {"backend": self.host.follower.tail(300) if self.host.follower else "",
                                         "switcher": tail_file(LOG_DIR / "manager.log", 150)})
         elif route == "config" and method == "GET":
-            await respond(writer, 200, {"config": self.cfg, "defaults": config.DEFAULTS,
+            # other devices already hold the link; they don't need it handed back
+            cfg = self.cfg if local else {**self.cfg, "dashboard_token": ""}
+            await respond(writer, 200, {"config": cfg, "defaults": config.DEFAULTS,
                                         "service_keys": sorted(SERVICE_KEYS)})
         elif route == "config" and method == "POST":
-            await respond(writer, *self.update_config(data.get("config", {})))
+            changes = data.get("config", {})
+            await respond(writer, *self.update_config(changes if isinstance(changes, dict) else {}, local))
         elif route == "action" and method == "POST":
-            await respond(writer, *self.action(data.get("action", "")))
+            await respond(writer, *self.action(str(data.get("action", ""))))
         elif route == "setup" and method == "GET":
             since = int((re.search(r"since=(\d+)", target) or [0, 0])[1])
             await respond(writer, 200, self.setup.report(since))
-        elif route == "hardware" and method == "GET":
-            if not self.setup.hw or "refresh=1" in target:
+        elif route == "hardware" and method in ("GET", "POST"):
+            if not self.setup.hw or method == "POST":     # POST: look again
                 await self.setup.check()
             await respond(writer, 200, self.setup.hw or {})
         elif route == "metrics" and method == "GET":
@@ -826,12 +865,12 @@ class Service:
             if self.observe:
                 await respond(writer, 409, {"ok": False, "message": "observe mode"})
                 return
-            ok, msg = await self.setup.run(data.get("step", ""))
+            ok, msg = await self.setup.run(str(data.get("step", "")))
             await respond(writer, 200 if ok else 409, {"ok": ok, "message": msg})
         else:
             await respond(writer, 404, {"error": "not found"})
 
-    def update_config(self, changes):
+    def update_config(self, changes, local=True):
         restart_keys = {"quant", "context", "lean_vram_gb", "lean_ram_gb", "full_vram_headroom_gb", "max_ram_cache_gib"}
         changed, service = [], []
         new = {}
@@ -844,6 +883,9 @@ class Service:
                 return 400, {"ok": False, "message": f"bad value for {k}"}
             if k in config.FILE_ONLY_KEYS and v != self.cfg[k]:
                 return 400, {"ok": False, "message": f"{k} can only be changed in config.json"}
+            if k in config.LOCAL_ONLY_KEYS and v != self.cfg[k] and not local:
+                # the private link is built from it: another device could point the next link at itself
+                return 403, {"ok": False, "message": f"{k} can only be changed on the PC itself"}
             if k == "quant" and v not in sizing.QUANTS:
                 return 400, {"ok": False, "message": "unknown quant"}
             if k == "context" and not 4096 <= v <= 262144:
@@ -1010,17 +1052,13 @@ class Service:
         self.tlock = asyncio.Lock()
         self.quit = asyncio.Event()
         cfg = self.cfg
-        remote = cfg["listen_host"] not in ("127.0.0.1", "localhost", "::1") or cfg["network_port"]
-        if remote and not cfg["dashboard_token"] and not self.observe:
-            cfg["dashboard_token"] = secrets.token_urlsafe(18)
-            config.save_config(cfg)
-            log.info("generated a dashboard token for other devices (config.json dashboard_token)")
+        config.ensure_token(cfg, save=not self.observe)
         self.mon.start()
         hosts = ["127.0.0.1", "::1"] if cfg["listen_host"] == "127.0.0.1" else [cfg["listen_host"]]
         try:
             server = await asyncio.start_server(self.handle, hosts, cfg["listen_port"], limit=8 * 1024 * 1024)
         except OSError as e:
-            raise SystemExit(f"port {cfg['listen_port']} is in use: {e}")
+            raise SystemExit(f"port {cfg['listen_port']} is in use: {e}") from e
         try:
             self.host.start_follower()
         except Exception as e:  # noqa: BLE001 - no WSL yet: setup will create it
@@ -1038,7 +1076,7 @@ class Service:
             if t:
                 self.spawn(self.start(t, "preload on launch"))
         if open_window:
-            self.host.open_ui(f"http://127.0.0.1:{cfg['listen_port']}/")
+            self.host.open_ui(f"http://127.0.0.1:{cfg['listen_port']}/?token={cfg['dashboard_token']}")
         async with server:
             await self.quit.wait()
         if self.host.follower:
@@ -1058,6 +1096,23 @@ def host_name(headers):
         return urllib.parse.urlsplit("//" + header(headers, "host")).hostname or ""
     except ValueError:
         return ""
+
+
+def token_count(*values):
+    """The first whole number from 0 to 10M; else 0. A client can echo its own 'usage' text into a response, so the
+    figures read from it are never trusted as they are."""
+    for v in values:
+        if isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 10_000_000:
+            return v
+    return 0
+
+
+def is_ip(name):
+    try:
+        ipaddress.ip_address(name)
+        return True
+    except ValueError:
+        return False
 
 
 def same_origin(headers):

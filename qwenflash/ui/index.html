@@ -296,6 +296,7 @@ let S = null, CFG = null, DEF = null, tab = "activity", setupSeq = 0;
 async function api(path, body) {
   const r = await fetch(API + path, body === undefined ? {} :
     { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (r.status === 401) { location.reload(); return {}; }   // the private link's cookie expired: show the sign-in page
   return r.json();
 }
 function ago(t) {
@@ -328,8 +329,8 @@ function renderStatus() {
   const sy = S.engine_sync;
   if (sy && sy.separate) {
     $("syncBadge").style.display = "";
-    $("syncBadge").innerHTML = sy.in_sync ? `<span class="dot" style="--c:var(--good)"></span>engine ${sy.engine}` :
-      `<span class="dot" style="--c:var(--warning)"></span>engine ${sy.engine}, repo ${sy.repo}: update in Setup`;
+    $("syncBadge").innerHTML = sy.in_sync ? `<span class="dot" style="--c:var(--good)"></span>engine ${esc(sy.engine)}` :
+      `<span class="dot" style="--c:var(--warning)"></span>engine ${esc(sy.engine)}, repo ${esc(sy.repo)}: update in Setup`;
   }
   const bad = (S.recommendations || []).filter((r) => r.level === "error" || r.level === "warn");
   $("recNote").style.display = bad.length ? "block" : "none";
@@ -390,7 +391,7 @@ function renderStatus() {
   $("events").innerHTML = S.events.slice().reverse().map(([t, k, m]) =>
     `<li><span class="t">${new Date(t * 1000).toLocaleTimeString()}</span><span class="k">${esc(k)}</span><span>${esc(m)}</span></li>`).join("");
 }
-function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 
 function segBar(el, parts, total) {
   el.innerHTML = "";
@@ -604,7 +605,7 @@ async function pollSetup() {
 }
 
 async function loadHardware(refresh) {
-  const hw = await api("hardware" + (refresh ? "?refresh=1" : ""));
+  const hw = await api("hardware", refresh ? {} : undefined);   // POST looks again
   if (!hw || !hw.host) return;
   const g = (hw.gpus || [])[0], e = hw.engine || {}, w = hw.wsl, wc = hw.wslconfig || {};
   const F = [];

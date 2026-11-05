@@ -21,7 +21,7 @@ from pathlib import Path
 
 import psutil
 
-from .config import IS_WINDOWS, REPO, log
+from .config import IS_WINDOWS, REPO, WSL_EXE, log
 from .nvml import Nvml
 
 NO_WINDOW = subprocess.CREATE_NO_WINDOW if IS_WINDOWS else 0
@@ -321,7 +321,7 @@ class WindowsWSL(Host):
         return self.cfg["repo_dir"] or "/root/qwen-flash"
 
     def engine_argv(self, *args):
-        return ["wsl.exe", "-d", self.cfg["distro"], "-u", "root", "--", *args]
+        return [WSL_EXE, "-d", self.cfg["distro"], "-u", "root", "--exec", *args]
 
     def to_engine_path(self, local):
         p = str(Path(local).resolve())
@@ -418,9 +418,11 @@ class WindowsWSL(Host):
 
 
 def make_shortcut(lnk, target, args, workdir, desc="QwenFlash"):
-    ps = (f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{lnk}');$s.TargetPath='{target}';"
-          f"$s.Arguments='{args}';$s.WorkingDirectory='{workdir}';$s.Description='{desc}';$s.Save()")
-    subprocess.run(["powershell.exe", "-NoProfile", "-Command", ps], creationflags=NO_WINDOW, timeout=30)
+    """A Windows shortcut, made through COM (pywin32): no command line, so no quoting to get wrong."""
+    import win32com.client
+    s = win32com.client.Dispatch("WScript.Shell").CreateShortcut(str(lnk))
+    s.TargetPath, s.Arguments, s.WorkingDirectory, s.Description = str(target), args, str(workdir), desc
+    s.Save()
 
 
 def make_host(cfg):

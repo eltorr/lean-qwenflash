@@ -1,45 +1,100 @@
 """Minimal HTTP/1.1 plumbing on asyncio streams (stdlib only; one backend connection per request)."""
+import asyncio
 import json
+import re
 
 HOP = {"connection", "keep-alive", "proxy-connection", "host", "content-length", "transfer-encoding", "upgrade", "te",
        "expect"}
+# never passed on to the model server: the dashboard's token, and the key only the manager may send
+PRIVATE = {"cookie", "authorization", "proxy-authorization", "x-qwenflash-key"}
+BACKEND_KEY_HEADER = "X-QwenFlash-Key"
 REASONS = {200: "OK", 302: "Found", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
-           409: "Conflict", 502: "Bad Gateway", 503: "Service Unavailable"}
+           405: "Method Not Allowed", 409: "Conflict", 413: "Content Too Large", 431: "Headers Too Large",
+           501: "Not Implemented", 502: "Bad Gateway", 503: "Service Unavailable"}
+# sent with every response: no framing (clickjacking), no type sniffing, no address in Referer
+SECURITY_HEADERS = ("X-Frame-Options: DENY", "Content-Security-Policy: frame-ancestors 'none'",
+                    "X-Content-Type-Options: nosniff", "Referrer-Policy: no-referrer")
+MAX_HEAD = 64 * 1024
+HEAD_TIMEOUT_S, BODY_TIMEOUT_S = 30, 300
+TOKEN = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+")
 
 
-async def read_request(reader, writer=None):
-    head = await reader.readuntil(b"\r\n\r\n")
-    lines = head.decode("latin-1").split("\r\n")
-    method, target, _ver = lines[0].split(" ", 2)
+class HTTPError(Exception):
+    def __init__(self, status, message):
+        super().__init__(message)
+        self.status = status
+
+
+async def read_head(reader):
+    """The request line and headers. Raises HTTPError for anything a strict parser would refuse: a bare CR, LF or NUL
+    inside a line (the model server's parser would split there), malformed or repeated framing headers."""
+    head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), HEAD_TIMEOUT_S)
+    if len(head) > MAX_HEAD:
+        raise HTTPError(431, "request headers too large")
+    lines = head[:-4].split(b"\r\n")
+    if any(b"\r" in ln or b"\n" in ln or b"\0" in ln for ln in lines):
+        raise HTTPError(400, "bad characters in the request headers")
+    parts = lines[0].decode("latin-1").split(" ")
+    if len(parts) != 3 or not TOKEN.fullmatch(parts[0]) or not parts[1].startswith("/") \
+            or not parts[2].startswith("HTTP/1."):
+        raise HTTPError(400, "bad request line")
     headers = []
     for line in lines[1:]:
-        if line:
-            k, _, v = line.partition(":")
-            headers.append((k.strip(), v.strip()))
-    hmap = {k.lower(): v for k, v in headers}
-    if writer is not None and hmap.get("expect", "").lower() == "100-continue":
+        k, sep, v = line.decode("latin-1").partition(":")
+        if not sep or not TOKEN.fullmatch(k):
+            raise HTTPError(400, "bad header line")
+        headers.append((k, v.strip(" \t")))
+    names = [k.lower() for k, _ in headers]
+    if any(names.count(n) > 1 for n in ("host", "content-length", "transfer-encoding")) \
+            or ("content-length" in names and "transfer-encoding" in names):
+        raise HTTPError(400, "conflicting request headers")
+    return parts[0], parts[1], headers
+
+
+async def read_body(reader, writer, headers, limit):
+    """The request body, at most `limit` bytes. Called only once the request has passed its checks."""
+    h = {k.lower(): v for k, v in headers}
+    te = h.get("transfer-encoding", "").lower()
+    if te and te != "chunked":
+        raise HTTPError(501, "unsupported transfer encoding")
+    if "content-length" in h and not re.fullmatch(r"\d{1,15}", h["content-length"]):
+        raise HTTPError(400, "bad Content-Length")
+    size = int(h.get("content-length", "0"))
+    if size > limit:
+        raise HTTPError(413, f"request body over {limit // 1024 // 1024 or 1} MB")
+    if h.get("expect", "").lower() == "100-continue":
         writer.write(b"HTTP/1.1 100 Continue\r\n\r\n")      # curl & co. wait for this before sending large bodies
         await writer.drain()
-    body = b""
-    if "content-length" in hmap:
-        body = await reader.readexactly(int(hmap["content-length"]))
-    elif hmap.get("transfer-encoding", "").lower() == "chunked":
-        parts = []
+
+    async def chunked():
+        parts, total = [], 0
         while True:
-            size = int((await reader.readuntil(b"\r\n")).split(b";")[0], 16)
-            if size == 0:
-                await reader.readuntil(b"\r\n")
-                break
-            parts.append(await reader.readexactly(size))
-            await reader.readexactly(2)
-        body = b"".join(parts)
-    return method, target, headers, body
+            m = re.fullmatch(rb"([0-9A-Fa-f]{1,8})(;[^\r\n]*)?\r\n", await reader.readuntil(b"\r\n"))
+            if not m:
+                raise HTTPError(400, "bad chunk size")
+            n = int(m.group(1), 16)
+            total += n
+            if total > limit:
+                raise HTTPError(413, f"request body over {limit // 1024 // 1024 or 1} MB")
+            if n == 0:
+                while (await reader.readuntil(b"\r\n")) != b"\r\n":   # trailers, ignored
+                    pass
+                return b"".join(parts)
+            parts.append(await reader.readexactly(n))
+            if await reader.readexactly(2) != b"\r\n":
+                raise HTTPError(400, "bad chunk")
+
+    if te == "chunked":
+        return await asyncio.wait_for(chunked(), BODY_TIMEOUT_S)
+    return await asyncio.wait_for(reader.readexactly(size), BODY_TIMEOUT_S) if size else b""
 
 
-def backend_request(method, target, headers, body, port):
+def backend_request(method, target, headers, body, port, key=""):
     out = [f"{method} {target} HTTP/1.1"]
-    out += [f"{k}: {v}" for k, v in headers if k.lower() not in HOP]
+    out += [f"{k}: {v}" for k, v in headers if k.lower() not in HOP and k.lower() not in PRIVATE]
     out += [f"Host: 127.0.0.1:{port}", "Connection: close"]
+    if key:
+        out.append(f"{BACKEND_KEY_HEADER}: {key}")
     if body or method in ("POST", "PUT", "PATCH"):
         out.append(f"Content-Length: {len(body)}")
     return ("\r\n".join(out) + "\r\n\r\n").encode("latin-1") + body
@@ -49,7 +104,8 @@ async def respond(writer, status, body, ctype="application/json", extra=()):
     if not isinstance(body, (bytes, bytearray)):
         body = json.dumps(body).encode()
     head = [f"HTTP/1.1 {status} {REASONS.get(status, 'OK')}", f"Content-Type: {ctype}",
-            f"Content-Length: {len(body)}", "Cache-Control: no-store", "Connection: close", *extra]
+            f"Content-Length: {len(body)}", "Cache-Control: no-store", "Connection: close", *SECURITY_HEADERS,
+            *extra]
     writer.write(("\r\n".join(head) + "\r\n\r\n").encode() + body)
     try:
         await writer.drain()
@@ -70,16 +126,16 @@ def oai_error(msg, kind="server_busy", code=503):
     return {"error": {"message": msg, "type": kind, "code": code}}
 
 
-def http_get_json(url, timeout=2.0):
+def http_get_json(url, timeout=2.0, headers=None):
     import urllib.request
-    with urllib.request.urlopen(url, timeout=timeout) as r:
+    with urllib.request.urlopen(urllib.request.Request(url, headers=headers or {}), timeout=timeout) as r:
         return json.load(r)
 
 
-def http_ok(url, timeout=2.0):
+def http_ok(url, timeout=2.0, headers=None):
     import urllib.request
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as r:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers or {}), timeout=timeout) as r:
             return r.status == 200
     except Exception:  # noqa: BLE001
         return False

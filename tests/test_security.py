@@ -1,4 +1,7 @@
-"""The dashboard's guards: requests from other websites, DNS rebinding, and settings the HTTP API can't change."""
+"""The guards against other websites, other devices and hostile input: request parsing, origins, DNS rebinding, the
+token, settings the HTTP API can't change, and figures read back from responses."""
+import asyncio
+import math
 import os
 import sys
 import tempfile
@@ -9,7 +12,58 @@ from pathlib import Path
 os.environ["QWENFLASH_HOME"] = tempfile.mkdtemp(prefix="qf-test-")      # never a real settings dir
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from qwenflash import config  # noqa: E402
-from qwenflash.service import Service, host_name, same_origin  # noqa: E402
+from qwenflash.httpio import HTTPError, backend_request, read_body, read_head  # noqa: E402
+from qwenflash.service import Service, host_name, same_origin, token_count  # noqa: E402
+
+
+def parse(raw, limit=1024):
+    """read_head then read_body on raw request bytes."""
+    async def go():
+        r = asyncio.StreamReader()
+        r.feed_data(raw)
+        r.feed_eof()
+        method, target, headers = await read_head(r)
+        return method, target, headers, await read_body(r, None, headers, limit)
+    return asyncio.run(go())
+
+
+class ParserTests(unittest.TestCase):
+    def test_plain_and_chunked_bodies(self):
+        self.assertEqual(parse(b"POST /v1/x HTTP/1.1\r\nHost: a\r\nContent-Length: 2\r\n\r\nhi")[3], b"hi")
+        raw = b"POST /v1/x HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nhi\r\n1;x=y\r\n!\r\n0\r\n\r\n"
+        self.assertEqual(parse(raw)[3], b"hi!")
+
+    def test_refused_heads(self):
+        bad = [b"GET / HTTP/1.1\r\nX-A: 1\nTransfer-Encoding: chunked\r\n\r\n",   # bare LF: the backend would split
+               b"GET / HTTP/1.1\r\nX-A: \x00\r\n\r\n",
+               b"GET / HTTP/1.1\r\nHost: a\r\nHost: b\r\n\r\n",
+               b"POST / HTTP/1.1\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n",
+               b"POST / HTTP/1.1\r\nContent-Length: 1\r\nTransfer-Encoding: chunked\r\n\r\n",
+               b"GET http://x/ HTTP/1.1\r\n\r\n",
+               b"GET / HTTP/1.1\r\n folded: x\r\n\r\n"]
+        for raw in bad:
+            with self.assertRaises(HTTPError, msg=raw):
+                parse(raw)
+
+    def test_refused_bodies(self):
+        for raw in (b"POST / HTTP/1.1\r\nContent-Length: 2000\r\n\r\n",              # over the limit, unread
+                    b"POST / HTTP/1.1\r\nContent-Length: 0x3\r\n\r\nabc",
+                    b"POST / HTTP/1.1\r\nContent-Length: -1\r\n\r\n",
+                    b"POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n1_0\r\n",
+                    b"POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n800\r\n" + b"x" * 2048 + b"\r\n0\r\n\r\n",
+                    b"POST / HTTP/1.1\r\nTransfer-Encoding: gzip\r\n\r\n"):
+            with self.assertRaises(HTTPError, msg=raw):
+                parse(raw)
+
+    def test_token_and_key_never_reach_the_model_server(self):
+        out = backend_request("POST", "/v1/x", [("Cookie", "qf_token=t"), ("Authorization", "Bearer t"),
+                                                ("X-QwenFlash-Key", "forged"), ("Content-Type", "a/b")], b"", 30001,
+                              "real").decode()
+        self.assertNotIn("qf_token", out)
+        self.assertNotIn("Bearer", out)
+        self.assertNotIn("forged", out)
+        self.assertIn("X-QwenFlash-Key: real", out)
+        self.assertIn("Content-Type: a/b", out)
 
 
 class OriginTests(unittest.TestCase):
@@ -30,13 +84,58 @@ class OriginTests(unittest.TestCase):
             self.assertEqual(host_name([("Host", host)]), name, host)
 
 
+def service(**cfg):
+    return types.SimpleNamespace(cfg={**config.DEFAULTS, "dashboard_token": "tok", **cfg}, observe=True,
+                                 event=lambda *a: None, be=types.SimpleNamespace(state="stopped"))
+
+
+class RequestTests(unittest.TestCase):
+    def refusal(self, method, headers, front=False, **cfg):
+        svc = service(network_port=11434, remote_host="pc.example", **cfg)
+        svc.network_origin_ok = lambda h: Service.network_origin_ok(svc, h)
+        return Service.refusal(svc, method, headers, front)
+
+    def test_main_port_answers_local_names_only(self):
+        self.assertIsNone(self.refusal("GET", [("Host", "127.0.0.1:30000")]))
+        self.assertIsNone(self.refusal("POST", [("Host", "localhost:30000")]))
+        self.assertEqual(self.refusal("GET", [("Host", "rebind.example:30000")])[0], 403)   # DNS rebinding
+
+    def test_network_port_pages_must_come_from_this_pc(self):
+        ok = [("Host", "pc.example:11434"), ("Origin", "http://pc.example:11434")]
+        self.assertIsNone(self.refusal("POST", ok, front=True))
+        self.assertIsNone(self.refusal("POST", [("Host", "100.64.0.10:11434"), ("Origin", "http://100.64.0.10:11434")],
+                                       front=True))
+        rebound = [("Host", "rebind.example:11434"), ("Origin", "http://rebind.example:11434")]
+        self.assertEqual(self.refusal("POST", rebound, front=True)[0], 403)
+        self.assertIsNone(self.refusal("POST", [("Host", "anything:11434")], front=True))   # programs: no Origin
+
+    def test_cross_site_posts_are_refused(self):
+        self.assertEqual(self.refusal("POST", [("Host", "127.0.0.1:30000"), ("Origin", "https://evil.example")])[0],
+                         403)
+
+    def test_token_from_cookie_or_bearer_and_from_the_link_only_on_the_page(self):
+        svc = service()
+        self.assertTrue(Service.token_ok(svc, [("Cookie", "a=b; qf_token=tok")]))
+        self.assertTrue(Service.token_ok(svc, [("Authorization", "Bearer tok")]))
+        self.assertTrue(Service.token_ok(svc, [], "/?token=tok"))
+        self.assertFalse(Service.token_ok(svc, []))                 # an API route: ?token= isn't looked at
+        self.assertFalse(Service.token_ok(svc, [("Cookie", "qf_token=nope")], "/?token=nope"))
+        self.assertFalse(Service.token_ok(service(dashboard_token=""), [("Cookie", "qf_token=")]))
+
+    def test_usage_figures_are_whole_numbers_in_range(self):
+        self.assertEqual(token_count(12, 5), 12)
+        self.assertEqual(token_count(None, 7), 7)
+        for bad in ("x", 1e308, -1, True, 10**12, float("nan")):
+            self.assertEqual(token_count(bad), 0, bad)
+
+
 class SettingsTests(unittest.TestCase):
     def setUp(self):
-        self.svc = types.SimpleNamespace(cfg=dict(config.DEFAULTS), observe=True, event=lambda *a: None,
-                                         be=types.SimpleNamespace(state="stopped"))
+        self.svc = service()
+        self.svc.cfg["dashboard_token"] = ""
 
-    def update(self, changes):
-        return Service.update_config(self.svc, changes)
+    def update(self, changes, local=True):
+        return Service.update_config(self.svc, changes, local)
 
     def test_paths_programs_and_ports_only_in_config_json(self):
         for k, v in (("repo_dir", "/tmp/x'; id; '"), ("ui_browser", "C:/Windows/System32/cmd.exe"),
@@ -45,17 +144,39 @@ class SettingsTests(unittest.TestCase):
             self.assertEqual(status, 400, k)
         self.assertEqual(self.svc.cfg, config.DEFAULTS)
 
+    def test_other_devices_cannot_rename_the_pc(self):
+        status, _ = self.update({"remote_host": "attacker.example"}, local=False)
+        self.assertEqual(status, 403)
+        self.assertEqual(self.svc.cfg["remote_host"], "")
+
     def test_a_bad_value_changes_nothing(self):
         status, _ = self.update({"watchlist": "game.exe", "remote_host": 'a" onmouseover="x'})
         self.assertEqual(status, 400)
         self.assertEqual(self.svc.cfg["watchlist"], [])
 
+    def test_numbers_must_be_finite_and_in_range(self):
+        for k, v in (("poll_s", "nan"), ("poll_s", "-1"), ("poll_s", "0"), ("lean_ram_gb", "inf"),
+                     ("ram_lean_gb", "1e400"), ("context", 100), ("pressure_response", "reboot")):
+            status, _ = self.update({k: v})
+            self.assertEqual(status, 400, (k, v))
+        self.assertEqual(self.svc.cfg, {**config.DEFAULTS, "dashboard_token": ""})
+
     def test_normal_settings_save(self):
         # the dashboard may resend a file-only setting unchanged
-        status, r = self.update({"listen_port": "30000", "watchlist": "game.exe", "remote_host": "omni.example"})
+        status, r = self.update({"listen_port": "30000", "watchlist": "game.exe", "remote_host": "omni.example",
+                                 "poll_s": "2", "pressure_response": "pause"})
         self.assertEqual(status, 200, r)
         self.assertEqual(self.svc.cfg["watchlist"], ["game.exe"])
         self.assertEqual(self.svc.cfg["remote_host"], "omni.example")
+        self.assertEqual(self.svc.cfg["poll_s"], 2.0)
+
+    def test_config_json_values_are_type_checked_on_load(self):
+        config.CONFIG_PATH.write_text('{"lean_ram_gb": "a[$(id)]", "poll_s": NaN, "context": 65536}')
+        cfg = config.load_config()
+        self.assertEqual(cfg["lean_ram_gb"], config.DEFAULTS["lean_ram_gb"])
+        self.assertTrue(math.isfinite(cfg["poll_s"]))
+        self.assertEqual(cfg["context"], 65536)
+        config.CONFIG_PATH.unlink()
 
 
 if __name__ == "__main__":

@@ -7,8 +7,10 @@ QWENFLASH_HOME overrides both.
 """
 import json
 import logging
+import math
 import os
 import re
+import secrets
 import shutil
 import sys
 from pathlib import Path
@@ -18,6 +20,12 @@ GB = 1e9
 GIB = 1024 ** 3
 SERVED_NAME = "qwen3.8-flash-next"
 IS_WINDOWS = sys.platform == "win32"
+# Windows programs by full path, and never a same-named program from the current folder (git, nvidia-smi...)
+SYSTEM32 = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32"
+WSL_EXE = str(SYSTEM32 / "wsl.exe")
+POWERSHELL_EXE = str(SYSTEM32 / "WindowsPowerShell" / "v1.0" / "powershell.exe")
+if IS_WINDOWS:
+    os.environ["NoDefaultCurrentDirectoryInExePath"] = "1"
 
 
 def state_dir():
@@ -29,6 +37,11 @@ def state_dir():
         d = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "qwenflash"
     d.mkdir(parents=True, exist_ok=True)
     (d / "logs").mkdir(exist_ok=True)
+    if not IS_WINDOWS:
+        try:
+            os.chmod(d, 0o700)    # config.json holds the private link's token (on Windows the profile is private)
+        except OSError:
+            pass
     return d
 
 
@@ -88,6 +101,10 @@ DEFAULTS = {
 SERVICE_KEYS = {"listen_port", "backend_port", "listen_host", "repo_dir", "distro", "network_port"}
 # settings that name programs, paths, ports or the private link: only config.json changes them, never the HTTP API
 FILE_ONLY_KEYS = SERVICE_KEYS | {"wsl_location", "ui_browser", "dashboard_token"}
+# settings only this PC's own dashboard may change, not other devices with the private link
+LOCAL_ONLY_KEYS = {"remote_host"}
+# settings with a fixed set of values
+CHOICES = {"pressure_response": ("lean", "pause"), "gpu_busy_action": ("lean", "pause")}
 RENAMED = {"windows_ram_reserve_gb": "ram_reserve_gb"}
 
 logging.basicConfig(filename=LOG_DIR / "manager.log", level=logging.INFO,
@@ -123,33 +140,54 @@ def load_config():
     if CONFIG_PATH.exists():
         try:
             data = json.loads(CONFIG_PATH.read_text())
+            if not isinstance(data, dict):
+                raise ValueError("not a JSON object")
             for a, b in RENAMED.items():
                 if a in data and b not in data:
                     data[b] = data.pop(a)
-            cfg.update({k: v for k, v in data.items() if k in DEFAULTS})
         except Exception as e:  # noqa: BLE001 - a bad config must not stop the service
             log.warning("config.json unreadable (%s); using defaults", e)
+            data = {}
+        for k, v in data.items():
+            if k in DEFAULTS:
+                try:
+                    cfg[k] = coerce(k, v)   # values reach scripts and processes: keep each to its type
+                except (TypeError, ValueError):
+                    log.warning("config.json: ignoring the bad value of %s", k)
     return cfg
 
 
 def save_config(cfg):
+    """Write config.json readable by this user only: it holds the private link's token."""
     tmp = CONFIG_PATH.with_suffix(".tmp")
-    tmp.write_text(json.dumps(cfg, indent=2))
+    with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+        f.write(json.dumps(cfg, indent=2))
+    if not IS_WINDOWS:
+        os.chmod(tmp, 0o600)
     os.replace(tmp, CONFIG_PATH)
 
 
+# number ranges; other numbers must be 0 or more
+MINIMUM = {"poll_s": 0.5, "context": 4096, "listen_port": 1, "backend_port": 1}
+MAXIMUM = {"context": 262144, "listen_port": 65535, "backend_port": 65535, "network_port": 65535}
+
+
 def coerce(key, value):
+    """A setting's value as its default's type; ValueError if it doesn't fit."""
     d = DEFAULTS[key]
     if isinstance(d, bool):
         return value if isinstance(value, bool) else str(value).lower() in ("1", "true", "on", "yes")
-    if isinstance(d, int):
-        return int(float(value))
-    if isinstance(d, float):
-        return float(value)
+    if isinstance(d, (int, float)):
+        x = float(value)
+        if not math.isfinite(x) or not MINIMUM.get(key, 0) <= x <= MAXIMUM.get(key, math.inf):
+            raise ValueError(f"{key} is out of range")
+        return int(x) if isinstance(d, int) else x
     if isinstance(d, list):
         if isinstance(value, str):
             value = [x.strip() for x in re.split(r"[,\n]", value)]
         return [str(x).strip() for x in value if str(x).strip()]
+    if key in CHOICES and str(value) not in CHOICES[key]:
+        raise ValueError(f"{key} must be one of {', '.join(CHOICES[key])}")
     return str(value)
 
 
@@ -166,3 +204,28 @@ def save_json(name, data):
     tmp = p.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, indent=2))
     os.replace(tmp, p)
+
+
+def secret(name):
+    """A random secret kept in the state folder, readable by this user only; made on first use."""
+    p = STATE / name
+    try:
+        s = p.read_text().strip()
+        if s:
+            return s
+    except OSError:
+        pass
+    s = secrets.token_urlsafe(24)
+    with os.fdopen(os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+        f.write(s)
+    return s
+
+
+def ensure_token(cfg, save=True):
+    """The dashboard's token (its private link), made on first use. Every port needs it for the dashboard."""
+    if not cfg["dashboard_token"]:
+        cfg["dashboard_token"] = secrets.token_urlsafe(18)
+        if save:
+            save_config(cfg)
+            log.info("generated the dashboard token (config.json dashboard_token)")
+    return cfg["dashboard_token"]

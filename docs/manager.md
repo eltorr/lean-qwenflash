@@ -120,7 +120,7 @@ Every port uses the same layout: the API is under `/v1`, and the web page is at 
    Without the link, the port's root shows a page where you can paste the link, and the dashboard's controls
    refuse requests.
 
-Don't expose port 30000 itself. It trusts every connection that comes from the PC, and `tailscale serve` forwards
-connections from the PC.
+Don't expose port 30000 itself; it only answers requests addressed to `127.0.0.1` or `localhost`. On the PC, the
+dashboard needs the same link: `QwenFlash.cmd` and `qwenflash open` sign the browser in.
 
 Over SSH, `ssh -L 30000:127.0.0.1:30000 host` reaches everything instead.

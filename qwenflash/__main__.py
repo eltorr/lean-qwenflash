@@ -27,15 +27,21 @@ def service_url(cfg):
 
 
 def dashboard_url(cfg):
-    """The dashboard, at the root of the port that serves the API on /v1."""
-    return f"http://127.0.0.1:{cfg['listen_port']}/"
+    """The dashboard, at the root of the port that serves the API on /v1, opened with its token: the page keeps it in
+    a cookie and drops it from the address bar."""
+    return f"http://127.0.0.1:{cfg['listen_port']}/?token={cfg['dashboard_token']}"
+
+
+def auth(cfg):
+    """The dashboard's control API needs its token, on this PC too."""
+    return {"Authorization": f"Bearer {cfg['dashboard_token']}"}
 
 
 def cmd_serve(cfg, a):
     from .service import Service
     if a.port:
         cfg["listen_port"] = a.port
-    if http_ok(service_url(cfg) + "api/status", 1.5):
+    if http_ok(service_url(cfg) + "api/status", 1.5, auth(cfg)):
         if a.open:
             from .host import make_host
             make_host(cfg).open_ui(dashboard_url(cfg))
@@ -51,7 +57,7 @@ def cmd_serve(cfg, a):
 
 def cmd_open(cfg, a):
     url = service_url(cfg)
-    if not http_ok(url + "api/status", 1.5):
+    if not http_ok(url + "api/status", 1.5, auth(cfg)):
         exe = sys.executable
         if IS_WINDOWS:
             pyw = os.path.join(os.path.dirname(exe), "pythonw.exe")
@@ -62,7 +68,7 @@ def cmd_open(cfg, a):
             subprocess.Popen([exe, "-m", "qwenflash", "serve"], cwd=REPO, start_new_session=True,
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for _ in range(40):
-            if http_ok(url + "api/status", 1.0):
+            if http_ok(url + "api/status", 1.0, auth(cfg)):
                 break
             time.sleep(0.5)
     from .host import make_host
@@ -72,7 +78,7 @@ def cmd_open(cfg, a):
 
 def cmd_status(cfg, a):
     try:
-        s = http_get_json(service_url(cfg) + "api/status", 3)
+        s = http_get_json(service_url(cfg) + "api/status", 3, auth(cfg))
     except Exception as e:  # noqa: BLE001
         print(f"QwenFlash is not running ({e})")
         return 1
@@ -118,17 +124,21 @@ def cmd_detect(cfg, a):
     print(f"platform {h['label']}: {h.get('os')}{' (inside WSL)' if h.get('in_wsl') else ''}")
     print(f"cpu      {hw['cpu'].get('name')} ({hw['cpu'].get('cores')} cores), RAM {hw['ram']['total_gb']} GB")
     for g in hw["gpus"]:
-        print(f"gpu {g['index']}    {g['name']}  {g['vram_total'] / 2**30:.0f} GB  sm_{(g['compute_capability'] or '?').replace('.', '')}"
+        sm = (g["compute_capability"] or "?").replace(".", "")
+        print(f"gpu {g['index']}    {g['name']}  {g['vram_total'] / 2**30:.0f} GB  sm_{sm}"
               f"  PCIe {g.get('pcie_gen_max')}.0 x{g.get('pcie_width_max')}")
     if "wsl" in hw:
         w = hw["wsl"]
         print(f"wsl      {'installed ' + (w['version'] or '') if w['installed'] else 'not installed'}; "
-              f"{w['distro']}: {'present (WSL ' + str(w['distro_wsl_version']) + ')' if w['distro_present'] else 'missing'}"
+              f"{w['distro']}: "
+              f"{'present (WSL ' + str(w['distro_wsl_version']) + ')' if w['distro_present'] else 'missing'}"
               f"; .wslconfig memory {hw['wslconfig'].get('memory_gb')} GB")
     e = hw.get("engine") or {}
     if e:
-        print(f"engine   {'ready' if e.get('engine') == '1' else 'not set up'} at {cfg['repo_dir'] or 'this checkout'}; "
-              f"CUDA {e.get('cuda_version')}, torch {e.get('torch')}{', built for ' + e['build_arch'] if e.get('build_arch') else ''}; "
+        built = ", built for " + e["build_arch"] if e.get("build_arch") else ""
+        ready = "ready" if e.get("engine") == "1" else "not set up"
+        print(f"engine   {ready} at {cfg['repo_dir'] or 'this checkout'}; "
+              f"CUDA {e.get('cuda_version')}, torch {e.get('torch')}{built}; "
               f"models: 3.05 {'yes' if e.get('m305') == '1' else 'no'}, 4.05 {'yes' if e.get('m405') == '1' else 'no'}")
     print("recommendations:")
     print_recommendations(hw["recommendations"])
@@ -205,7 +215,8 @@ def cmd_plan(cfg, a):
         print(f"this machine: {info['name']} ({info['vram_total'] / 2**30:.0f} GB, "
               f"{'display' if has_display(info) else 'no display'}), "
               f"{ram / 2**30:.0f} GB RAM, {sizing.PLATFORMS.get(h.kind, h.kind)}")
-        print("baseline:     " + sizing.describe(machine_baseline(info, ram, h.kind)).replace("\n  ", "\n              "))
+        baseline = sizing.describe(machine_baseline(info, ram, h.kind))
+        print("baseline:     " + baseline.replace("\n  ", "\n              "))
         print(f"your config:  {cfg['quant']} bpw, {cfg['context'] // 1024}K context")
         print()
     budget = a.budget_gb * GB if a.budget_gb else (gpu_budget(h.gpu.info(), cfg) if h.gpu else 0)
@@ -242,6 +253,7 @@ def main(argv=None):
     if not config.CONFIG_PATH.exists():
         first_run_baseline(cfg)
         config.save_config(cfg)
+    config.ensure_token(cfg)
     handler = {None: cmd_serve, "serve": cmd_serve, "open": cmd_open, "status": cmd_status, "detect": cmd_detect,
                "setup": cmd_setup, "plan": cmd_plan}[a.cmd]
     return handler(cfg, a)

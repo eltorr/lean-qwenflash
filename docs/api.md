@@ -97,8 +97,9 @@ for chunk in client.chat.completions.create(
 
 ## Control API (the dashboard's, not OpenAI)
 
-Under `http://127.0.0.1:30000/_switcher/api/`, or on the network port with the dashboard token (a Bearer header, or
-the private link's cookie).
+Under `/_switcher/api/` on any port, with the dashboard token: a Bearer header, or the private link's cookie. The
+token is `dashboard_token` in `config.json`. On the network port, `setup/run`, `quit`, `quit_keep_model`,
+autostart, `new_remote_link` and `remote_host` are refused: they're only for the PC itself.
 
 | Method | Path | What |
 |---|---|---|
@@ -109,6 +110,12 @@ the private link's cookie).
 | GET | `log` | Tails of the model's and the manager's logs |
 | GET / POST | `setup`, `setup/run` | Setup status; `{"step": "build"}` runs one step |
 
-Requests that a web page on another site sends are refused: a browser's POST must come from the dashboard's own
-address. On port 30000, the dashboard only answers requests addressed to `127.0.0.1`, `localhost` or `::1`, so a
-website can't reach it by pointing its own domain at this PC.
+**What's refused:**
+
+- **Other websites:** a browser request from another site, a page on port 30000 that isn't addressed to
+  `127.0.0.1`, `localhost` or `::1`, and a page on the network port that isn't one of the PC's names. That stops
+  DNS rebinding.
+- **GET on the completion routes:** they take POST only.
+- **Malformed requests:** bad header characters, conflicting lengths, bodies over 1 MB (dashboard) or 64 MB
+  (`/v1`), and requests that stall.
+- **Direct calls to the model server:** it only answers requests that carry a key, which only the manager sends.

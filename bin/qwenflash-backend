@@ -12,7 +12,7 @@
 # Why not setsid everywhere: under WSL, a detached pipeline started through wsl.exe is killed when that wsl.exe
 # exits (single processes survive), so the server died writing to its log filter right after the manager started it.
 set -u
-cd "$(dirname "$(readlink -f "$0")")/.."
+cd "$(dirname "$(readlink -f "$0")")/.." || exit 1
 D=.qwenflash
 mkdir -p "$D"
 PIDF=$D/backend.pid
@@ -22,7 +22,8 @@ UNIT=qwenflash-backend
 if [ "$(id -u)" = 0 ]; then SC=(systemctl); SR=(systemd-run); else SC=(systemctl --user); SR=(systemd-run --user); fi
 have_systemd() { [ -d /run/systemd/system ] && "${SC[@]}" show-environment >/dev/null 2>&1; }
 mode() { cat "$MODEF" 2>/dev/null; }
-strays() { pgrep -f '[q]wen_server\.py' | tr '\n' ' '; }
+# model servers run by this user only: another account's process named like one is not ours to wait for or stop
+strays() { pgrep -u "$(id -u)" -f '[q]wen_server\.py' | tr '\n' ' '; }
 alive() {
   if [ "$(mode)" = systemd ]; then "${SC[@]}" is-active --quiet "$UNIT"
   else [ -f "$PIDF" ] && kill -0 "$(cat "$PIDF")" 2>/dev/null; fi
@@ -36,7 +37,11 @@ case "${1:-}" in
     [ "${1:-}" = "--" ] && shift
     if alive; then echo "running $(cat "$PIDF")"; exit 3; fi
     if [ -n "$(strays)" ]; then echo "stray $(strays)"; exit 4; fi      # another server would hold the port and GPU
-    echo "# $(date '+%F %T') start: ${envs[*]} ./run.sh $*" > "$LOG"
+    shown=()     # the dashboard shows this log: leave the manager's key out of it
+    for e in "${envs[@]}"; do
+      case "$e" in QWENFLASH_BACKEND_KEY=*) shown+=("QWENFLASH_BACKEND_KEY=...") ;; *) shown+=("$e") ;; esac
+    done
+    echo "# $(date '+%F %T') start: ${shown[*]} ./run.sh $*" > "$LOG"
     if have_systemd; then
       "${SC[@]}" reset-failed "$UNIT" >/dev/null 2>&1
       ram=""
@@ -77,9 +82,9 @@ case "${1:-}" in
       kill -KILL -- "-$p" 2>/dev/null
     fi
     if [ -n "$(strays)" ]; then
-      pkill -TERM -f '[q]wen_server\.py'
+      pkill -TERM -u "$(id -u)" -f '[q]wen_server\.py'
       for _ in $(seq $((t * 2))); do [ -n "$(strays)" ] || break; sleep 0.5; done
-      pkill -KILL -f '[q]wen_server\.py'
+      pkill -KILL -u "$(id -u)" -f '[q]wen_server\.py'
     fi
     rm -f "$PIDF"
     echo stopped

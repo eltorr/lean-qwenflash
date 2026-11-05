@@ -8,12 +8,13 @@ import asyncio
 import collections
 import os
 import re
+import time
 from pathlib import Path
 
 import psutil
 
 from . import hardware
-from .config import GB, IS_WINDOWS, REPO, log
+from .config import GB, IS_WINDOWS, POWERSHELL_EXE, REPO, SYSTEM32, WSL_EXE, log
 
 W = "windows-wsl"
 L = "linux"
@@ -174,11 +175,11 @@ class Setup:
         hw = self.hw or await self.check()
         if hw and hw["wsl"]["installed"]:
             self.emit("WSL is installed; updating it")
-            return await self.host.stream(["wsl.exe", "--update"], self.emit)
+            return await self.host.stream([WSL_EXE, "--update"], self.emit)
         self.emit("installing WSL (approve the administrator prompt)...")
-        ps = ("Start-Process wsl.exe -ArgumentList '--install','--no-distribution' -Verb RunAs -Wait "
-              "-PassThru | ForEach-Object { exit $_.ExitCode }")
-        rc = await self.host.stream(["powershell.exe", "-NoProfile", "-Command", ps], self.emit)
+        ps = ("Start-Process ($env:SystemRoot + '/System32/wsl.exe') -ArgumentList '--install','--no-distribution' "
+              "-Verb RunAs -Wait -PassThru | ForEach-Object { exit $_.ExitCode }")
+        rc = await self.host.stream([POWERSHELL_EXE, "-NoProfile", "-Command", ps], self.emit)
         if rc == 0:
             self.emit("WSL installed. If Windows asks for a restart, restart, then reopen QwenFlash and continue.")
         return rc
@@ -189,8 +190,9 @@ class Setup:
         p = Path.home() / ".wslconfig"
         lines = p.read_text(errors="replace").splitlines() if p.exists() else []
         if p.exists():
-            p.with_suffix(".bak").write_text("\n".join(lines) + "\n")
-            self.emit(f"backed up the existing file to {p.with_suffix('.bak')}")
+            bak = p.with_name(f".wslconfig.{time.strftime('%Y%m%d-%H%M%S')}.bak")   # every earlier version kept
+            bak.write_text("\n".join(lines) + "\n")
+            self.emit(f"backed up the existing file to {bak}")
         # update [wsl2] memory/processors/swap in place; keep every other setting the user has
         want = {"memory": f"{mem}GB", "processors": str(os.cpu_count()), "swap": "8GB"}
         out, section, seen = [], None, set()
@@ -215,25 +217,41 @@ class Setup:
         p.write_text("\n".join(out).strip() + "\n")
         self.emit(f"wrote {p}: memory={mem}GB processors={os.cpu_count()} swap=8GB")
         self.emit("restarting WSL so the limit applies (wsl --shutdown)")
-        return await self.host.stream(["wsl.exe", "--shutdown"], self.emit)
+        return await self.host.stream([WSL_EXE, "--shutdown"], self.emit)
+
+    async def restrict_folder(self, path):
+        """Let only this user, SYSTEM and Administrators into the distro's folder. Under a drive root, Windows lets
+        every signed-in account modify new files, and the disk image holds the engine that runs as root."""
+        import win32api
+        import win32security
+        token = win32security.OpenProcessToken(win32api.GetCurrentProcess(), win32security.TOKEN_QUERY)
+        me = win32security.ConvertSidToStringSid(win32security.GetTokenInformation(token, win32security.TokenUser)[0])
+        Path(path).mkdir(parents=True, exist_ok=True)
+        self.emit(f"limiting {path} to this user, SYSTEM and Administrators")
+        return await self.host.stream([str(SYSTEM32 / "icacls.exe"), path, "/inheritance:r", "/grant:r",
+                                       f"*{me}:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F"],
+                                      self.emit)
 
     async def _distro(self):
         cfg = self.svc.cfg
         hw = self.hw or await self.check()
         if not (hw and hw["wsl"]["distro_present"]):
             loc = self.suggested_location()
+            rc = await self.restrict_folder(loc)
+            if rc != 0:
+                return rc
             self.emit(f"installing {cfg['distro']} at {loc}")
-            rc = await self.host.stream(["wsl.exe", "--install", "-d", cfg["distro"], "--location", loc,
+            rc = await self.host.stream([WSL_EXE, "--install", "-d", cfg["distro"], "--location", loc,
                                          "--no-launch"], self.emit)
             if rc != 0:
                 return rc
             self.emit("first start (unpacks the distro)...")
-            await self.host.stream(["wsl.exe", "-d", cfg["distro"], "-u", "root", "--", "true"], self.emit)
+            await self.host.stream([WSL_EXE, "-d", cfg["distro"], "-u", "root", "--exec", "true"], self.emit)
         # the engine's launcher uses systemd scopes for its RAM guard
         rc = await self.host.stream(self.host.engine_argv(
             "bash", "-c", "grep -q '^systemd=true' /etc/wsl.conf 2>/dev/null && echo 'systemd already enabled' || "
                           "{ printf '[boot]\\nsystemd=true\\n' >> /etc/wsl.conf; echo 'enabled systemd'; }"), self.emit)
-        await self.host.stream(["wsl.exe", "--terminate", cfg["distro"]], self.emit)
+        await self.host.stream([WSL_EXE, "--terminate", cfg["distro"]], self.emit)
         return rc
 
     def _driver(self):

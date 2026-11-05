@@ -15,7 +15,7 @@ from pathlib import Path
 import psutil
 
 
-from .config import GB, GIB, IS_WINDOWS, REPO
+from .config import GB, GIB, IS_WINDOWS, REPO, WSL_EXE
 
 sys.path.insert(0, str(REPO))
 import sizing  # noqa: E402  (repo root: shared with run.sh and the engine)
@@ -44,17 +44,17 @@ def wsl_info(distro):
     info = {"installed": False, "version": None, "kernel": None, "default_version": None, "distros": [],
             "distro": distro, "distro_present": False, "distro_wsl_version": None, "distro_state": None,
             "distro_path": None}
-    rc, out, _ = _run(["wsl.exe", "--version"], env=WSL_ENV)
+    rc, out, _ = _run([WSL_EXE, "--version"], env=WSL_ENV)
     if rc == 0 and "WSL" in out:
         info["installed"] = True
         m = re.search(r"WSL[^:\n]*:\s*([\d.]+)", out)
         info["version"] = m.group(1) if m else None
         m = re.search(r"Kernel[^:\n]*:\s*([\w.+-]+)", out)
         info["kernel"] = m.group(1) if m else None
-    rc, out, _ = _run(["wsl.exe", "--status"], env=WSL_ENV)
+    rc, out, _ = _run([WSL_EXE, "--status"], env=WSL_ENV)
     m = re.search(r"Default Version:\s*(\d)", out)
     info["default_version"] = int(m.group(1)) if m else None
-    rc, out, _ = _run(["wsl.exe", "-l", "-v"], env=WSL_ENV)
+    rc, out, _ = _run([WSL_EXE, "-l", "-v"], env=WSL_ENV)
     for line in out.splitlines()[1:]:
         parts = line.replace("*", " ").split()
         if len(parts) >= 3 and parts[-1].isdigit():
