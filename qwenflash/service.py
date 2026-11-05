@@ -605,7 +605,9 @@ class Service:
         u = stats.usage() or {}
         if stats.status != 200 or not u:
             return
-        pt, ct = u.get("prompt_tokens") or 0, u.get("completion_tokens") or 0
+        # chat: prompt/completion_tokens; Responses: input/output_tokens
+        pt = u.get("prompt_tokens") or u.get("input_tokens") or 0
+        ct = u.get("completion_tokens") or u.get("output_tokens") or 0
         ttft = (stats.t_first - t_send) if stats.t_first else None
         decode_s = (t_end - stats.t_first) if stats.t_first else None
         self.metrics.append({
@@ -736,7 +738,7 @@ class Service:
             elif method == "GET" and p == "/v1/models":
                 await respond(writer, 200, self.models_list())
                 close(writer)
-            elif p in ("/v1/chat/completions", "/v1/completions") and self.route_model(body) == "qwen":
+            elif p in ("/v1/chat/completions", "/v1/responses", "/v1/completions") and self.route_model(body) == "qwen":
                 await self.forward(method, target, headers, body, writer)
             elif (front or path.startswith("/v1/")) and self.ollama_up:
                 await self.forward_ollama(method, target, headers, body, writer)
@@ -746,7 +748,8 @@ class Service:
             elif front or path.startswith("/v1/"):
                 await respond(writer, 404, {"error": {
                     "message": f"{path} is not available: this server is QwenFlash (OpenAI-compatible: "
-                               f"/v1/chat/completions, /v1/completions, /v1/models). Embeddings, images, the Anthropic "
+                               f"/v1/chat/completions, /v1/responses, /v1/completions, /v1/models). Embeddings, "
+                               f"images, the Anthropic "
                                f"/v1/messages API and Ollama's /api/* are not supported.",
                     "type": "not_found", "code": 404}})
                 close(writer)

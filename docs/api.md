@@ -1,30 +1,33 @@
 # QwenFlash API
 
-OpenAI **Chat Completions**-compatible. Tested with the official `openai` Python SDK: model list, chat,
-streaming, `reasoning_effort`, and a full tool-call round trip.
+OpenAI-compatible: **Chat Completions** and **Responses**. Tested with the official `openai` Python SDK: model
+list, chat, streaming, `reasoning_effort`, a full tool-call round trip, and the Responses API (plain, streamed, tools,
+`previous_response_id`).
 
 ```
 Base URL:  http://127.0.0.1:30000/v1                   (this PC)
-           http://127.0.0.1:11434/v1                   (this PC, Ollama's old port)
+           http://127.0.0.1:11434/v1                   (optional front door on Ollama's port, off by default)
            http://<tailnet-host>:11434/v1              (tailnet, via tailscale serve)
 API key:   not checked (send any non-empty string if your client insists)
 Model:     qwen3.8-flash-next   (any name works: Ollama names such as qwen3.8 are answered by QwenFlash too)
 ```
 
-Port 11434 and the tailnet URL are the "front door". It serves the same API, but never the dashboard/control API,
-and `GET /` returns `QwenFlash is running` for health checks.
+Port 11434 and the tailnet URL are the optional "front door" for replacing an Ollama install
+([manager guide](manager.md#replacing-ollama-on-a-tailnet-windows-example)). It serves the same API, but never the
+dashboard/control API, and `GET /` returns `QwenFlash is running` for health checks.
 
 ## Endpoints
 
 | Method | Path | Notes |
 |---|---|---|
 | POST | `/v1/chat/completions` | Main endpoint. Streaming or not, tools, reasoning control |
+| POST | `/v1/responses` | OpenAI's newer Responses API, on the same model: streaming or not, function tools, reasoning, `previous_response_id`. See [Responses API](#responses-api) |
 | POST | `/v1/completions` | Legacy raw-prompt completion. Takes a single prompt; only the first of a list is used |
 | GET | `/v1/models` | Answered by the switcher without loading the model |
 
-Not available: `/v1/responses`, `/v1/embeddings`, images, audio, files, batches, assistants, Anthropic
-`/v1/messages`, and Ollama's native `/api/*`. These return 404 with a message saying what is supported. If Ollama
-is running alongside on `127.0.0.1:11435`, these are passed through to it instead (see the README).
+Not available: `/v1/embeddings`, images, audio, files, batches, assistants, Anthropic `/v1/messages`, and
+Ollama's native `/api/*`. These return 404 with a message saying what is supported. With the front door on and
+Ollama running alongside on `127.0.0.1:11435`, these are passed through to it instead.
 
 ## Request fields (`/v1/chat/completions`)
 
@@ -66,6 +69,39 @@ watch for repetition in long thinking-off outputs.
   - `delta.reasoning_content` streams first, then `delta.content`.
   - Tool calls arrive whole, in one delta at the end; arguments are not streamed piece by piece.
   - The last chunk carries `finish_reason` and `usage`, followed by `data: [DONE]`.
+
+## Responses API
+
+`POST /v1/responses` runs on the same pipeline as chat, so the model, sampling, tools and reasoning behave the same.
+The engine translates (`qwen38-flash-offload/qwen38/openai_responses.py`), so it also works without the manager.
+
+| Field | Supported | Notes |
+|---|---|---|
+| `input` | yes | A string, or items: messages (`user`, `assistant`, `system`, `developer`), `function_call`, `function_call_output`. `reasoning` items are skipped. **Text only**: images, files and audio return 400 |
+| `instructions` | yes | Becomes the system message, merged with leading `developer`/`system` messages |
+| `stream` | yes | Standard Responses events, see below |
+| `tools` | partial | `function` tools. Built-in tools (web search, file search, computer use, code interpreter, MCP, custom/freeform) are left out |
+| `tool_choice` | partial | `"none"` disables tools; anything else behaves like `"auto"` |
+| `previous_response_id` | yes | The server remembers the last 64 responses in memory while it runs. After a restart, send the whole conversation as `input` instead. `store: false` skips remembering |
+| `reasoning.effort` | yes | Mapped like chat's `reasoning_effort` (`minimal`, `low`, `medium`, `high`, `max`, `none`) |
+| `max_output_tokens`, `temperature`, `top_p` | yes | As in chat |
+| `text.format`, `include`, `truncation`, `parallel_tool_calls`, `metadata` | **accepted, ignored** | No structured outputs; `metadata` is echoed back |
+
+- **Output:** a `reasoning` item with the model's thinking as `reasoning_text` content (the convention of other
+  open-weight reasoning models, e.g. gpt-oss on vLLM), a `message` item with the answer, and one `function_call`
+  item per tool call. The SDK's `response.output_text` gives the answer.
+- **Streaming events:** `response.created`, `response.in_progress`, then per item `response.output_item.added`,
+  `response.content_part.added`, `response.reasoning_text.delta` / `response.output_text.delta`, the matching
+  `.done` events, `response.output_item.done`; tool calls arrive whole as `response.function_call_arguments.delta`
+  and `.done`. The last event is `response.completed`, or `response.incomplete` when `max_output_tokens` cut it off.
+- **Usage:** `input_tokens` and `output_tokens`; cached and reasoning token counts are reported as 0.
+
+```python
+r = client.responses.create(model="qwen3.8-flash-next", input="Explain B-trees in two sentences.",
+                            reasoning={"effort": "medium"})
+print(r.output_text)
+follow_up = client.responses.create(model="qwen3.8-flash-next", input="Now in one.", previous_response_id=r.id)
+```
 
 ## QwenFlash-specific behaviour
 

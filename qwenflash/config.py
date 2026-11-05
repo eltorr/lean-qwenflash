@@ -79,10 +79,11 @@ DEFAULTS = {
     "start_timeout_s": 600,
     "poll_s": 1.5,
     "ui_browser": "",
-    # Ollama-compatible front door: QwenFlash answers on ollama_alias_port (Ollama's usual port) and passes
-    # anything it doesn't serve to an Ollama moved to ollama_port. 0 disables the front door.
+    # Optional Ollama-compatible front door, for replacing an Ollama install (docs/manager.md): set ollama_alias_port
+    # to 11434 and QwenFlash answers on Ollama's usual port, passing anything it doesn't serve to an Ollama moved
+    # to ollama_port. 0 (the default) leaves it off.
     "ollama_port": 11435,
-    "ollama_alias_port": 11434,
+    "ollama_alias_port": 0,
     "qwenflash_aliases": [],
 }
 # settings that only take effect when the service restarts

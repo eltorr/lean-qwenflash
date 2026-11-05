@@ -107,13 +107,20 @@
   pre.console { background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 12px;
     font: 12px/1.45 ui-monospace, Consolas, monospace; max-height: 420px; overflow: auto; white-space: pre-wrap;
     margin: 0; color: var(--text-primary); }
-  .form { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
-  .form fieldset { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--surface-1); }
+  /* settings: the four cards 2 x 2 (one column on narrow screens), equal height per row; in each row the label
+     takes the room and the control only what it needs */
+  .form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(460px, 100%), 1fr)); gap: 14px; }
+  .form fieldset { border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px 14px; background: var(--surface-1);
+    margin: 0; }
   .form legend { font-weight: 600; padding: 0 6px; }
-  .field { display: grid; grid-template-columns: 1fr 200px; gap: 4px 10px; align-items: center; margin: 8px 0; }
-  .field .help { grid-column: 1 / -1; color: var(--text-muted); font-size: 12px; margin-top: -2px; }
+  .field { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 14px; align-items: center; margin: 10px 0; }
+  .field label { line-height: 1.35; }
+  .field .help { grid-column: 1 / -1; color: var(--text-muted); font-size: 12px; margin-top: -2px; line-height: 1.4; }
   .field input[type=number], .field select, textarea { font: inherit; background: var(--surface-2); color: var(--text-primary);
-    border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; width: 100%; }
+    border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; width: 100%; }
+  .field select { width: auto; min-width: 180px; max-width: 100%; }
+  .field input[type=number] { width: 96px; text-align: right; font-variant-numeric: tabular-nums; }
+  .field input[type=checkbox] { width: 18px; height: 18px; margin: 0; justify-self: end; }
   textarea { min-height: 80px; grid-column: 1 / -1; }
   .steps { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
   .step { display: grid; grid-template-columns: 130px 1fr auto; gap: 12px; align-items: center; background: var(--surface-1);
@@ -136,6 +143,23 @@
   .facts .k { color: var(--text-secondary); font-size: 12px; } .facts .v { font-weight: 600; }
   .facts .n { color: var(--text-muted); font-size: 12px; }
   h3 { font-size: 13px; color: var(--text-secondary); margin: 18px 0 8px; }
+  .form fieldset { min-width: 0; }
+  /* phones and narrow windows: stack label/input, step status/action, event time/message */
+  @media (max-width: 640px) {
+    .viz-root { padding: 12px 12px 32px; }
+    header { gap: 8px 12px; }
+    .endpoint { margin-left: 0; width: 100%; }
+    .endpoint code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; }
+    .card { padding: 14px; }
+    .field:has(select) { grid-template-columns: 1fr; }
+    .field select { width: 100%; }
+    .step { grid-template-columns: 1fr auto; gap: 6px 12px; }
+    .step > :nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
+    .events li { grid-template-columns: auto 1fr; gap: 2px 10px; }
+    .events li > :nth-child(3) { grid-column: 1 / -1; }
+    .tabs { overflow-x: auto; }
+    .tabs button { padding: 10px 12px; }
+  }
 </style>
 </head>
 <body>
@@ -175,7 +199,6 @@
         <div class="tile"><div class="label">Generation speed</div><div class="value" id="tDecode">-</div><div class="note" id="tDecodeNote"></div></div>
         <div class="tile"><div class="label">Prompt speed</div><div class="value" id="tPrefill">-</div><div class="note" id="tPrefillNote"></div></div>
       </div>
-      <div class="meta" id="ollamaNote" style="margin-top:12px"></div>
     </section>
     <section class="card">
       <h2>Other apps &amp; auto-switch</h2>
@@ -328,17 +351,14 @@ function renderStatus() {
   });
   const mt = S.metrics || {};
   $("tDecode").textContent = mt.decode_tps != null ? mt.decode_tps + " tok/s" : "-";
-  $("tDecodeNote").textContent = mt.count ? `median of recent requests · ${mt.tokens_out.toLocaleString()} tokens out` : "after the first request";
+  $("tDecodeNote").textContent = !mt.count ? "after the first request"
+    : mt.decode_tps != null ? `median of recent requests · ${mt.tokens_out.toLocaleString()} tokens out`
+    : `measured on streamed requests · ${mt.tokens_out.toLocaleString()} tokens out so far`;
   $("tPrefill").textContent = mt.prefill_tps != null ? Math.round(mt.prefill_tps).toLocaleString() + " tok/s" : "-";
   $("tPrefillNote").textContent = mt.ttft_s != null ? `first token in ${mt.ttft_s} s (median)` : "";
   $("tInflight").textContent = S.in_flight; $("tHeld").textContent = S.held; $("tServed").textContent = S.served;
   $("tFailed").textContent = S.failed ? S.failed + " refused or failed" : "";
   $("tLast").textContent = S.last_request ? ago(S.last_request) : "-";
-  const o = S.ollama;
-  if (o && o.front_port) {
-    const fd = o.front_bound ? `front door :${o.front_port}` : `front door :${o.front_port} <b>not bound</b> (port busy)`;
-    $("ollamaNote").innerHTML = `${fd} · Ollama on :${o.port} ${o.up ? `running, ${o.models} models` : "<b>not running</b>"} · ${o.requests} passed through`;
-  }
   const [pc, pi, pl] = PRESSURE[S.pressure.level];
   $("presIcon").className = "icon " + pc; $("presIcon").textContent = pi; $("presText").textContent = pl;
   $("presReasons").innerHTML = (S.pressure.reasons.length ? S.pressure.reasons : ["Nothing else needs the GPU or RAM right now"])
@@ -393,9 +413,14 @@ function renderBars() {
 }
 
 // ---- line chart: model vs other apps VRAM, crosshair + tooltip
-const W = 760, H = 230, M = { l: 34, r: 112, t: 10, b: 22 };
+// drawn at the chart's real pixel width (1 unit = 1 px), so text keeps its size on narrow screens
+let W = 760;
+const H = 230, M = { l: 34, r: 112, t: 10, b: 22 };
 function renderChart() {
   const h = S.history, svg = $("svg"), total = (S.gpu.total || 34e9) / 1e9;
+  W = Math.max(280, Math.round(svg.getBoundingClientRect().width) || 760);
+  M.r = W < 520 ? 96 : 112;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   if (!h.length) { svg.innerHTML = ""; return; }
   const t1 = h[h.length - 1][0], t0 = Math.min(h[0][0], t1 - 60);
   const x = (t) => M.l + ((t - t0) / (t1 - t0 || 1)) * (W - M.l - M.r);
@@ -478,6 +503,7 @@ const FIELDS = [
 ];
 function renderForm() {
   $("form").innerHTML = FIELDS.map(([title, fs]) => `<fieldset><legend>${title}</legend>` + fs.map(([k, label, type, opts, help]) => {
+    if (k === "qwenflash_aliases" && !CFG.ollama_alias_port) return "";   // only with the Ollama-style front door
     const v = CFG[k]; let input;
     if (type === "select") input = `<select data-k="${k}">${opts.map(([ov, ol]) => `<option value="${ov}" ${String(ov) === String(v) ? "selected" : ""}>${ol}</option>`).join("")}</select>`;
     else if (type === "check") input = `<input type="checkbox" data-k="${k}" ${v ? "checked" : ""}>`;
@@ -585,6 +611,7 @@ async function poll() {
   try { await loadConfig(); } catch { $("banner").style.display = "block"; }
   await poll();
   setInterval(poll, 1500);
+  window.addEventListener("resize", () => { if (S && S.history) renderChart(); });
   setInterval(async () => { if (tab === "setup" || (S && S.setup_running)) { try { await pollSetup(); } catch {} } }, 1000);
   setInterval(() => { if (tab === "logs") pollLogs().catch(() => {}); }, 3000);
 })();

@@ -2,8 +2,8 @@
 
 The manager runs next to the engine and makes it a service:
 
-- **One endpoint:** an OpenAI-compatible API on `http://127.0.0.1:30000/v1`, plus an Ollama-style front door on
-  port 11434. See [api.md](api.md).
+- **One endpoint:** an OpenAI-compatible API (Chat Completions and Responses) on `http://127.0.0.1:30000/v1`. An
+  Ollama-style front door on port 11434 is optional, for replacing an Ollama install. See [api.md](api.md).
 - **The model loads when called and makes room for other apps.** It sizes the model to the free VRAM and RAM,
   scales it back or pauses it when games or other GPU apps need the card, and re-saturates when they're done.
 - **A local web dashboard** to watch and control all of it: state, speed, GPU/RAM use, setup and logs.
@@ -141,9 +141,11 @@ Over SSH, a tunnel (`ssh -L 30000:127.0.0.1:30000 host`) keeps everything on loo
 
 ## Replacing Ollama on a tailnet (Windows example)
 
-This PC serves the tailnet in place of Ollama.
+This PC serves the tailnet in place of Ollama. The front door is off by default.
 
-- **Address:** QwenFlash answers on Ollama's port, 11434, through its front door. Other devices keep using
+- **Turn it on:** set `"ollama_alias_port": 11434` in `config.json` (`%LOCALAPPDATA%\QwenFlash` on Windows,
+  `~/.local/state/qwenflash` on Linux), quit Ollama or move it to port 11435, and restart the service.
+- **Address:** QwenFlash then answers on Ollama's port, 11434, through its front door. Other devices keep using
   `http://<tailnet-host>:11434/v1`.
 - **Exposure:** `tailscale serve --bg --tcp=11434 tcp://127.0.0.1:11434`. Check it with `tailscale serve status`;
   turn it off with `tailscale serve --tcp=11434 off`.

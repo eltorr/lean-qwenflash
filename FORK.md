@@ -41,8 +41,8 @@ The fork exists to run this model as a home service on one machine: an RTX 5090 
 of RAM, on Windows 11 with the engine in WSL2. There it replaced Ollama. Other devices on my tailnet reach it on
 Ollama's port, and its main client is an agent (Hermes Agent). Some of that shows in the defaults and docs:
 
-- The manager's front door takes Ollama's port, 11434. It answers QwenFlash's own model and passes other model names
-  through to Ollama, which moves to 11435. If you don't run Ollama, the plain endpoint is
+- On my machine the optional front door takes Ollama's port, 11434. It answers QwenFlash's own model and passes
+  other model names through to Ollama, which moves to 11435. It is off by default; the plain endpoint is
   `http://127.0.0.1:30000/v1`.
 - [docs/manager.md](docs/manager.md) has a section on serving a tailnet with `tailscale serve`.
 - The model gives the GPU back to games: it scales back or pauses when other apps need the card or the RAM.
@@ -59,8 +59,9 @@ The rest is meant to be general: the sizing and presets, setup for Linux and WSL
 **The manager** ([`qwenflash/`](qwenflash), [docs/manager.md](docs/manager.md)). It is plain Python
 (`psutil`, plus `pywin32` on Windows) and never touches the GPU itself.
 
-- **Endpoints:** an OpenAI-compatible endpoint on `127.0.0.1:30000/v1` and an Ollama-style front door.
-  [docs/api.md](docs/api.md) describes them.
+- **Endpoints:** an OpenAI-compatible endpoint (Chat Completions and Responses) on `127.0.0.1:30000/v1`, and an
+  optional Ollama-style front door. [docs/api.md](docs/api.md) describes them; see also
+  [the API: what's original and what's new](#the-api-whats-original-and-whats-new).
 - **Model lifecycle:**
   - Loads the model when a client calls it.
   - Picks a full or lean profile from the free VRAM and RAM.
@@ -99,8 +100,48 @@ The rest is meant to be general: the sizing and presets, setup for Linux and WSL
 - The earlier RTX 5090 + WSL2 results.
 - [Multi-GPU notes](docs/research/multi-gpu.md).
 
-**Tests** ([`tests/`](tests)): sizing and presets, the manager's config and planning, and the OpenAI request
-mapping, alongside upstream's tests.
+**Tests** ([`tests/`](tests)): sizing and presets, the manager's config and planning, the OpenAI request
+mapping and the Responses translation, alongside upstream's tests.
+
+## The API: what's original and what's new
+
+**From the original (MaxDevv).** The OpenAI-compatible server: `qwen_server.py`, which runs `qwen38/serve.py` on
+port 30000. It has:
+- `POST /v1/chat/completions`: streaming, function calling, and reasoning effort on the model's own scale (off,
+  low, medium, xhigh);
+- `POST /v1/completions`, the older raw-prompt endpoint;
+- `GET /v1/models`;
+- `/generate`, `/tokenize`, `/server_info` and `/stats`, for benchmark and diagnostic tools.
+
+**Fixed in the engine:**
+- **`reasoning_effort` mapping** ([`openai_compat.py`](qwen38-flash-offload/qwen38/openai_compat.py)). OpenAI's
+  `minimal`, `low`, `medium`, `high`, `max` and `none` map onto the model's levels. Before, `high` crashed the
+  chat template with HTTP 500, which is what Hermes Agent hit.
+
+**Added in the engine:**
+- **The Responses API**, `POST /v1/responses` ([`openai_responses.py`](qwen38-flash-offload/qwen38/openai_responses.py)).
+  It's OpenAI's newer API, used by the Agents SDK and Codex-style clients. It runs on the same pipeline as chat:
+  - streaming, with the standard Responses events;
+  - function tools;
+  - reasoning items;
+  - `previous_response_id`, kept in memory for the last 64 responses.
+
+  Chat and Responses now share one generation path. Every event type validates against the official SDK's models.
+
+**Added by the manager**, which sits in front of the engine: it takes port 30000 and moves the engine behind it
+to 30001.
+- **Loads on demand:** a request to a paused model starts it and waits while it loads.
+- **A queue:** one request generates at a time, and up to 8 wait.
+- **OpenAI-style errors:** 503 when it can't start, 502 when unreachable, 400 when the context is full.
+- **`/v1/models` without loading the model**, and any model name is accepted.
+- **Speed and token counts** on the dashboard, measured on streamed requests (chat and Responses).
+- **An optional Ollama-style front door** on port 11434, for replacing an Ollama install. It is off by default; I
+  use it so other devices on my tailnet keep their Ollama address.
+- **The dashboard's control API** (`/_switcher/api/...`). It is loopback only, and not OpenAI.
+- **[docs/api.md](docs/api.md)**, tested with the official `openai` Python SDK.
+
+**Still not supported:** embeddings, images and audio, Anthropic's `/v1/messages`, and Ollama's native `/api/*`.
+With the front door on and Ollama running beside it, those pass through to Ollama.
 
 ## Changes to upstream files
 

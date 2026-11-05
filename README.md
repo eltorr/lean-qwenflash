@@ -26,7 +26,7 @@
 | **Settings** | Server flags chosen by hand | Picked by `sizing.py`. Presets set quant, context and RAM cache from VRAM + RAM, and `./run.sh server` starts a server sized to the card |
 | **Install** | Manual steps | Setup tab or `qwenflash setup`:<ul><li>Windows: WSL and Ubuntu</li><li>CUDA 12.8 and the Python environment</li><li>kernel build</li><li>model download and packing</li></ul> |
 | **Running** | Start `qwen_server.py`; it runs until stopped | A manager service:<ul><li>starts the model on the first request</li><li>scales back or pauses for games and other GPU apps</li><li>restarts after a crash</li><li>keeps the model up across its own restarts</li></ul> |
-| **API** | OpenAI-compatible on port 30000 | The same, plus an Ollama-style front door on port 11434 that passes other models through to Ollama |
+| **API** | OpenAI Chat Completions on port 30000 (`/v1/chat/completions`, `/v1/completions`, `/v1/models`): streaming, function calling, reasoning levels | The same, plus:<ul><li>the **Responses API** (`/v1/responses`): streaming, function tools, reasoning, `previous_response_id`</li><li>OpenAI `reasoning_effort` values mapped</li><li>loads the model on the first request, queues the rest</li><li>OpenAI-style errors</li><li>an optional Ollama-style front door on port 11434 (off by default)</li></ul>Details: [FORK.md](FORK.md#the-api-whats-original-and-whats-new) |
 | **Monitoring** | Terminal output | Local web dashboard (loopback only): state, speed, GPU/RAM over time, settings, setup, logs |
 | **Benchmarks** | 4090 / 3080 table | Adds a VRAM-scaling benchmark, a preset matrix by VRAM and RAM, and reports |
 

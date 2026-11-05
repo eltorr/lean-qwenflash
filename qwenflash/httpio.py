@@ -94,6 +94,7 @@ class StreamStats:
         self.head = b""
         self.headers_done = False
         self.events = 0
+        self.responses = False
         self.status = None
 
     def feed(self, chunk, now):
@@ -109,10 +110,17 @@ class StreamStats:
                 pass
             chunk = self.head[i + 4:]
         if self.t_first is None:
-            # SSE: the first event only announces the role; the second carries the first generated token
-            self.events += chunk.count(b"data:")
-            if self.events >= 2:
-                self.t_first = now
+            if self.responses or b"event: response." in chunk:
+                # Responses API: created / in_progress / item-added events come first; the first *.delta event
+                # carries the first generated token
+                self.responses = True
+                if b'.delta"' in chunk:
+                    self.t_first = now
+            else:
+                # chat SSE: the first event only announces the role; the second carries the first generated token
+                self.events += chunk.count(b"data:")
+                if self.events >= 2:
+                    self.t_first = now
         self.tail = (self.tail + chunk)[-8192:]
 
     def usage(self):
