@@ -9,7 +9,7 @@
 > - presets that size the model to the machine;
 > - a few engine fixes.
 >
-> It is tuned for my own setup: an RTX 5090 on Windows 11, serving my home network in place of Ollama.
+> It is tuned for my own setup: an RTX 5090 on Windows 11, serving my home network.
 >
 > MaxDevv, anything here is yours to take into upstream or to build your own improvements on.
 
@@ -26,7 +26,7 @@
 | **Settings** | Server flags chosen by hand | Picked by `sizing.py`. Presets set quant, context and RAM cache from VRAM + RAM, and `./run.sh server` starts a server sized to the card |
 | **Install** | Manual steps | Setup tab or `qwenflash setup`:<ul><li>Windows: WSL and Ubuntu</li><li>CUDA 12.8 and the Python environment</li><li>kernel build</li><li>model download and packing</li></ul> |
 | **Running** | Start `qwen_server.py`; it runs until stopped | A manager service:<ul><li>starts the model on the first request</li><li>scales back or pauses for games and other GPU apps</li><li>restarts after a crash</li><li>keeps the model up across its own restarts</li></ul> |
-| **API** | OpenAI Chat Completions on port 30000 (`/v1/chat/completions`, `/v1/completions`, `/v1/models`): streaming, function calling, reasoning levels | The same, plus:<ul><li>the **Responses API** (`/v1/responses`): streaming, function tools, reasoning, `previous_response_id`</li><li>OpenAI `reasoning_effort` values mapped</li><li>loads the model on the first request, queues the rest</li><li>OpenAI-style errors</li><li>an optional Ollama-style front door on port 11434 (off by default)</li></ul>Details: [FORK.md](FORK.md#the-api-whats-original-and-whats-new) |
+| **API** | OpenAI Chat Completions on port 30000 (`/v1/chat/completions`, `/v1/completions`, `/v1/models`): streaming, function calling, reasoning levels | The same, plus:<ul><li>the **Responses API** (`/v1/responses`): streaming, function tools, reasoning, `previous_response_id`</li><li>OpenAI `reasoning_effort` values mapped</li><li>loads the model on the first request, queues the rest</li><li>OpenAI-style errors</li></ul>Details: [FORK.md](FORK.md#the-api-whats-original-and-whats-new) |
 | **Monitoring** | Terminal output | Local web dashboard (loopback only): state, speed, GPU/RAM over time, settings, setup, logs |
 | **Benchmarks** | 4090 / 3080 table | Adds a VRAM-scaling benchmark, a preset matrix by VRAM and RAM, and reports |
 
@@ -145,8 +145,8 @@ curl http://127.0.0.1:30000/v1/chat/completions -H "Content-Type: application/js
   -d '{"model": "qwen3.8-flash-next", "messages": [{"role": "user", "content": "Hello!"}]}'
 ```
 
-Two optional extras, both covered in the [manager guide](docs/manager.md): start the service when you sign in
-(**Settings**), and serve other devices through the Ollama-style port 11434.
+To start the service when you sign in, tick the box at the bottom of **Settings**. The
+[manager guide](docs/manager.md) covers the other options.
 
 Guides: [manager](docs/manager.md) · [API](docs/api.md) · [VRAM scaling results](research/vram-scaling/REPORT.md) ·
 [multi-GPU notes](docs/research/multi-gpu.md).
@@ -226,7 +226,7 @@ cell gives:
 
 | | Status | Notes |
 |---|---|---|
-| Windows 11 + WSL2, RTX 5090, 64 GB RAM | ✅ In daily use | Both quants at 256K context. Manager, dashboard, setup steps, auto-switch and the Ollama front door |
+| Windows 11 + WSL2, RTX 5090, 64 GB RAM | ✅ In daily use | Both quants at 256K context. Manager, dashboard, setup steps and auto-switch |
 | OpenAI API: Chat Completions and Responses | ✅ Tested | End to end with the official `openai` Python SDK on this PC: chat (plain, streamed, tools) and Responses (plain, streamed, a tool round trip, `previous_response_id`) |
 | Native Linux | 🟡 Partly | Checked inside WSL acting as a Linux host: the manager, dashboard, setup status, first-run preset, and the `systemd --user` backend as a normal user. No model has been started on a bare-metal Linux box yet |
 | Setup on a clean machine | ⚪ Not yet | The steps have run on this PC. A clean Windows or Linux install hasn't been tried |
