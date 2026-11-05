@@ -75,6 +75,7 @@ two safety changes: the model server refuses web pages, and it never runs code f
 | `qwen_server.py` | Prefill chunk from `QWEN_CHUNK`; refuses web pages, and on localhost other host names (DNS rebinding); takes the manager's key; no access log |
 | `download_http.py` | `--branch` and `--sha`, to fetch 4.05 bpw; both quants are pinned to one upload; every file is checked against its hash |
 | `qwen38-flash-offload/bench/sweep.py` | Sends the manager's key when it's set |
+| `qwen38-flash-offload/b70tier/ring.py` | The shared ring file is owner-only; it was world-writable |
 | `.gitignore` (+ `.gitattributes`) | The fork's files; LF endings for scripts that run in Linux |
 | `README.md` | Rewritten for the fork; the original's intro, benchmarks and manual install are kept |
 

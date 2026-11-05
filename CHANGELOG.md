@@ -33,6 +33,7 @@ From two security reviews of the fork's code.
   - every Python package (engine, manager and scanners) is pinned by hash;
   - NVIDIA's repository key is checked before it's trusted;
   - model files are checked against Hugging Face's hashes.
+- **B70 tier:** its shared ring file is owner-only; it was world-writable. This fork doesn't use the tier.
 
 ### Checks
 
