@@ -6,15 +6,17 @@ source "$(dirname "$0")/lib.sh"
 need_root
 
 if ! nvidia-smi >/dev/null 2>&1; then
-  if [ "$IN_WSL" = 1 ]; then
-    echo "nvidia-smi does not work inside WSL. Install or update the NVIDIA driver on Windows, then run: wsl --shutdown"
-  else
-    echo "No working NVIDIA driver. Install one first, then reboot. On Ubuntu:"
-    echo "  sudo ubuntu-drivers install     (or: sudo apt install nvidia-driver-570-open)"
-  fi
+  echo "No working NVIDIA driver (nvidia-smi fails)."
+  driver_help
   exit 11
 fi
 echo "GPU: $(nvidia-smi --query-gpu=name,memory.total,driver_version,compute_cap --format=csv,noheader)"
+drv=$(driver_cuda)
+if [ -n "$drv" ] && ! version_ge "$drv" "$CUDA_VER"; then
+  echo "This driver supports CUDA $drv; the engine is built with CUDA $CUDA_VER."
+  driver_help
+  exit 11
+fi
 
 . /etc/os-release
 if ! command -v apt-get >/dev/null; then
@@ -33,21 +35,28 @@ else
   elif [ "$ID" = ubuntu ]; then repo=ubuntu${VERSION_ID//./}
   elif [ "$ID" = debian ]; then repo=debian${VERSION_ID%%.*}
   else echo "no CUDA repository mapping for $PRETTY_NAME; install CUDA $CUDA_VER manually"; exit 12; fi
+  url=https://developer.download.nvidia.com/compute/cuda/repos/$repo/x86_64
+  # NVIDIA builds each CUDA release for some distribution releases only (CUDA 13: not Ubuntu 20.04 or Debian 11)
+  if ! listing=$(wget -q -O - "$url/"); then
+    echo "can't reach NVIDIA's CUDA repository for $PRETTY_NAME ($url)"; exit 12
+  fi
+  if ! grep -q "cuda-toolkit-${CUDA_VER/./-}_" <<<"$listing"; then
+    echo "NVIDIA has no CUDA $CUDA_VER for $PRETTY_NAME. Use Ubuntu 22.04 or newer, or Debian 12 or newer."
+    exit 12
+  fi
   # NVIDIA's repository key package, checked against its known hash before it is trusted (it adds a signing key)
   case "$repo" in
     wsl-ubuntu) keyring_sha=eea6cc5f0eaeb99082d054b8c05ae206a378e31e88048df0310d59f651dceed2 ;;
-    ubuntu2004) keyring_sha=cf5ca9853118b9fb2b78dd2708786e1eb5ab14e39d8738539281429428eb4efe ;;
     ubuntu2204) keyring_sha=d93190d50b98ad4699ff40f4f7af50f16a76dac3bb8da1eaaf366d47898ff8df ;;
     ubuntu2404) keyring_sha=d2a6b11c096396d868758b86dab1823b25e14d70333f1dfa74da5ddaf6a06dba ;;
     ubuntu2604) keyring_sha=f7f474b5f6a4adf987aa587920df00e713285958ef6a913dda1945a544a3099e ;;
-    debian11)   keyring_sha=dfc6e5cdbfc9b4cd1ca8bf6b6eda5d8582ca50d51b7e64ba049b935d52325d58 ;;
     debian12)   keyring_sha=e7f219eab6fe4819cdb5c15b98233dc3420302d9c00883219cd3d896857cf48d ;;
     debian13)   keyring_sha=d0d4ef986a44400f9db33c600ef33a985175e7cc63d805a10e1839c7a1e78f5f ;;
     *) echo "no known hash for NVIDIA's $repo keyring; install CUDA $CUDA_VER manually"; exit 12 ;;
   esac
   echo "installing CUDA $CUDA_VER toolkit from NVIDIA's $repo repository (several GB)..."
   tmp=$(mktemp -d)
-  wget -q -O "$tmp/keyring.deb" "https://developer.download.nvidia.com/compute/cuda/repos/$repo/x86_64/cuda-keyring_1.1-1_all.deb"
+  wget -q -O "$tmp/keyring.deb" "$url/cuda-keyring_1.1-1_all.deb"
   echo "$keyring_sha  $tmp/keyring.deb" | sha256sum -c --quiet - || { echo "NVIDIA's keyring package failed its hash check"; exit 12; }
   $SUDO dpkg -i "$tmp/keyring.deb" >/dev/null
   rm -rf "$tmp"

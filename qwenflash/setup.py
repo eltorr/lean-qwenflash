@@ -17,6 +17,7 @@ from . import hardware
 from .config import GB, IS_WINDOWS, POWERSHELL_EXE, REPO, SYSTEM32, WSL_EXE, log
 
 CUDA = hardware.engine_cuda()
+DRIVER = hardware.lib_value("DRIVER_MIN")
 
 W = "windows-wsl"
 L = "linux"
@@ -30,8 +31,8 @@ STEPS = [
     {"id": "distro", "title": "Ubuntu 24.04", "platforms": [W], "blocks": True,
      "desc": "Installs the Ubuntu-24.04 distro on the chosen drive (use your fastest NVMe) with systemd enabled."},
     {"id": "driver", "title": "NVIDIA driver", "platforms": [L], "blocks": False,
-     "desc": "Checks the driver. Installing one needs a reboot (and key enrollment with Secure Boot), so this step "
-             "shows the commands instead of running them."},
+     "desc": f"Checks for driver {DRIVER} or newer (CUDA {CUDA}). Installing one needs a reboot (and key enrollment "
+             "with Secure Boot), so this step shows the commands instead of running them."},
     {"id": "base", "title": f"Build tools + CUDA {CUDA}", "platforms": [W, L], "blocks": True, "script": "10_base.sh",
      "desc": f"Compiler, git, Python headers and NVIDIA's CUDA {CUDA} toolkit (no driver packages). Needs root/sudo."},
     {"id": "engine", "title": "Engine + Python environment", "platforms": [W, L], "blocks": True,
@@ -97,7 +98,7 @@ class Setup:
             st["wslconfig"] = "ok" if (wc.get("memory_gb") or 0) >= want * 0.9 else "missing"
             st["distro"] = "ok" if w["distro_present"] and w["distro_wsl_version"] == 2 else "missing"
         else:
-            st["driver"] = "ok" if hw["gpus"] else "missing"
+            st["driver"] = "missing" if not hw["gpus"] else "outdated" if hardware.driver_too_old(hw) else "ok"
         if not e or "error" in e:
             for sid in ("base", "engine", "build", "m305", "m405"):
                 st[sid] = "missing" if (IS_WINDOWS and st.get("distro") == "missing") else "unknown"
@@ -258,13 +259,19 @@ class Setup:
 
     def _driver(self):
         hw = self.hw or {}
-        if hw.get("gpus"):
+        old = hardware.driver_too_old(hw)
+        if hw.get("gpus") and not old:
             self.emit(f"driver {hw['driver'].get('version')} (CUDA {hw['driver'].get('cuda')}) sees "
                       f"{', '.join(g['name'] for g in hw['gpus'])}")
             return 0
-        self.emit("No working NVIDIA driver. Install one, then reboot:")
-        self.emit("  Ubuntu: sudo ubuntu-drivers install   (or: sudo apt install nvidia-driver-570-open)")
-        self.emit("  Other distros: your distribution's NVIDIA driver package (570 or newer for RTX 50 cards)")
+        if old:
+            self.emit(f"Driver {hw['driver'].get('version')} supports CUDA {old[0]}; the engine is built with CUDA "
+                      f"{old[1]}.")
+        else:
+            self.emit("No working NVIDIA driver.")
+        self.emit(f"Install driver {DRIVER} or newer, then reboot:")
+        self.emit(f"  Ubuntu: sudo apt install nvidia-driver-{DRIVER}-open   (or a newer nvidia-driver-*-open)")
+        self.emit("  Other distributions: https://docs.nvidia.com/datacenter/tesla/driver-installation-guide/")
         return 1
 
     def report(self, since=0):

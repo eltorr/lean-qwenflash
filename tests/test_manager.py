@@ -7,7 +7,7 @@ from pathlib import Path
 
 os.environ["QWENFLASH_HOME"] = tempfile.mkdtemp(prefix="qf-test-")      # never a real settings dir
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from qwenflash import config  # noqa: E402
+from qwenflash import config, hardware  # noqa: E402
 from qwenflash.httpio import StreamStats  # noqa: E402
 
 SSE = (b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\r\n",
@@ -15,6 +15,21 @@ SSE = (b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\r\n",
        b'data: {"choices":[{"delta":{"reasoning_content":"Hm"}}]}\n\n',
        b'data: {"choices":[{"delta":{"content":"Hi"},"finish_reason":"stop"}],'
        b'"usage":{"prompt_tokens":12,"completion_tokens":40,"total_tokens":52}}\n\ndata: [DONE]\n\n')
+
+
+class DriverTests(unittest.TestCase):
+    def test_versions_come_from_setup_lib_sh(self):
+        self.assertRegex(hardware.engine_cuda() or "", r"^\d+\.\d+$")
+        self.assertRegex(hardware.lib_value("DRIVER_MIN") or "", r"^\d{3}$")
+
+    def test_a_driver_older_than_the_engines_cuda(self):
+        need = hardware.engine_cuda()
+        major, minor = hardware.version(need)[:2]
+        self.assertIsNone(hardware.driver_too_old({"driver": {"cuda": need}}))
+        self.assertIsNone(hardware.driver_too_old({"driver": {"cuda": f"{major}.{minor + 1}"}}))
+        self.assertIsNone(hardware.driver_too_old({"driver": {"error": "no driver"}}))
+        old = hardware.driver_too_old({"driver": {"cuda": f"{major - 1}.9"}})
+        self.assertEqual(old, (f"{major - 1}.9", need, hardware.lib_value("DRIVER_MIN")))
 
 
 class StreamStatsTests(unittest.TestCase):

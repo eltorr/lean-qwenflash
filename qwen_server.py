@@ -118,20 +118,24 @@ def main():
     print('QWEN_SERVER_LOADED',backend.t_load,'seconds','RAM_CACHE_GiB',cli.ram_gb,'CONTEXT',cli.cache,flush=True)
     import uvicorn
     # no access log: request paths are client text, and the manager reads this log for out-of-memory messages
-    uvicorn.run(LocalOnly(backend.app,os.environ.get('QWENFLASH_BACKEND_KEY','')),host=cli.host,port=cli.port,
-                log_level='info',access_log=False)
+    uvicorn.run(LocalOnly(backend.app,os.environ.get('QWENFLASH_BACKEND_KEY',''),cli.host in LOCAL_NAMES),
+                host=cli.host,port=cli.port,log_level='info',access_log=False)
+
+LOCAL_NAMES=('127.0.0.1','localhost','::1')
 
 class LocalOnly:
-    """Answers local programs only: refuses web pages (any Origin header), requests addressed to a name other than
-    localhost (DNS rebinding), and, when the QwenFlash manager started this server with a key, requests without it."""
-    def __init__(self,app,key):self.app,self.key=app,key.encode()
+    """Refuses web pages (any Origin header) and, when the QwenFlash manager started this server with a key, requests
+    without it. Bound to localhost (the default), it also refuses requests addressed to another name (DNS rebinding);
+    bound to a network address (--host), it answers any name, as the operator chose."""
+    def __init__(self,app,key,local=True):self.app,self.key,self.local=app,key.encode(),local
     async def __call__(self,scope,receive,send):
         if scope['type']=='http':
             h=dict(scope['headers'])
             host=h.get(b'host',b'').decode('latin-1').lower()
             host=host[1:host.find(']')] if host.startswith('[') else host.rsplit(':',1)[0]
-            if b'origin' in h or host not in ('127.0.0.1','localhost','::1') or                     (self.key and not hmac.compare_digest(h.get(b'x-qwenflash-key',b''),self.key)):
-                body=b'{"error":"refused: this server only answers local programs"}'
+            if (b'origin' in h or (self.local and host not in LOCAL_NAMES)
+                    or (self.key and not hmac.compare_digest(h.get(b'x-qwenflash-key',b''),self.key))):
+                body=b'{"error":"refused: a web page, another host name, or a call without the manager key"}'
                 await send({'type':'http.response.start','status':403,'headers':[(b'content-type',b'application/json'),
                             (b'content-length',str(len(body)).encode())]})
                 await send({'type':'http.response.body','body':body})

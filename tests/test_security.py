@@ -8,6 +8,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 os.environ["QWENFLASH_HOME"] = tempfile.mkdtemp(prefix="qf-test-")      # never a real settings dir
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -177,6 +178,51 @@ class SettingsTests(unittest.TestCase):
         self.assertTrue(math.isfinite(cfg["poll_s"]))
         self.assertEqual(cfg["context"], 65536)
         config.CONFIG_PATH.unlink()
+
+
+class ModelServerTests(unittest.TestCase):
+    """qwen_server's guard. Importing qwen_server loads no engine; only jinja2 is stubbed when it isn't installed."""
+    @classmethod
+    def setUpClass(cls):
+        sandbox = types.ModuleType("jinja2.sandbox")
+        sandbox.ImmutableSandboxedEnvironment = object
+        try:
+            import jinja2.sandbox  # noqa: F401
+            stubs = {}
+        except ImportError:
+            stubs = {"jinja2": types.ModuleType("jinja2"), "jinja2.sandbox": sandbox}
+        with mock.patch.dict(sys.modules, stubs):
+            import qwen_server
+        cls.LocalOnly = qwen_server.LocalOnly
+
+    def call(self, headers, key="", local=True):
+        """'app' when the request reaches the model, else the refusal's status."""
+        reached, sent = [], []
+
+        async def app(scope, receive, send):
+            reached.append(scope)
+
+        async def send(message):
+            sent.append(message)
+        scope = {"type": "http", "headers": [(k.encode(), v.encode()) for k, v in headers.items()]}
+        asyncio.run(self.LocalOnly(app, key, local)(scope, None, send))
+        return "app" if reached else sent[0]["status"]
+
+    def test_bound_to_localhost(self):
+        self.assertEqual(self.call({"host": "127.0.0.1:30001"}), "app")
+        self.assertEqual(self.call({"host": "[::1]:30001"}), "app")
+        self.assertEqual(self.call({"host": "rebind.example:30001"}), 403)
+        self.assertEqual(self.call({"host": "127.0.0.1:30001", "origin": "https://site.example"}), 403)
+
+    def test_the_manager_key(self):
+        self.assertEqual(self.call({"host": "127.0.0.1"}, key="k1"), 403)
+        self.assertEqual(self.call({"host": "127.0.0.1", "x-qwenflash-key": "k2"}, key="k1"), 403)
+        self.assertEqual(self.call({"host": "127.0.0.1", "x-qwenflash-key": "k1"}, key="k1"), "app")
+
+    def test_bound_to_a_network_address(self):
+        # --host 0.0.0.0: the operator chose to serve the network, so any host name, but still no web pages
+        self.assertEqual(self.call({"host": "192.168.1.20:30000"}, local=False), "app")
+        self.assertEqual(self.call({"host": "192.168.1.20:30000", "origin": "https://site.example"}, local=False), 403)
 
 
 if __name__ == "__main__":

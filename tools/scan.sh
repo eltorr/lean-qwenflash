@@ -61,7 +61,7 @@ audit() {
   tmp=$(mktemp)
   for f in "${PINNED[@]}"; do
     echo "   $f"
-    sed -E 's/\+cu[0-9]+//' "$f" > "$tmp"     # torch's CUDA builds (2.11.0+cu128) are audited as the PyPI release
+    sed -E 's/\+cu[0-9]+//' "$f" > "$tmp"     # torch's CUDA builds (2.15.0+cu132) are audited as the PyPI release
     "$BIN/pip-audit" --progress-spinner off --disable-pip --no-deps -r "$tmp" "${IGNORE[@]/#/--ignore-vuln=}" || rc=1
   done
   rm -f "$tmp"

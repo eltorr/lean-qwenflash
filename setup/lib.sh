@@ -12,6 +12,7 @@ if [ "$(id -u)" != 0 ]; then
   if sudo -n true 2>/dev/null; then SUDO="sudo"; else SUDO="NEEDS_PASSWORD"; fi
 fi
 CUDA_VER=13.2        # the CUDA toolkit the kernels are built with; matches PyTorch's build (setup/requirements.in)
+DRIVER_MIN=595       # the NVIDIA driver branch for CUDA_VER (the table in NVIDIA's CUDA release notes)
 CUDA_HOME_DEFAULT=/usr/local/cuda-$CUDA_VER
 
 need_root() {
@@ -32,5 +33,24 @@ cuda_env() {
 }
 
 gpu_cc() { nvidia-smi -i "${QWEN_GPU:-0}" --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | tr -d ' '; }
+
+# the newest CUDA the installed driver supports, from nvidia-smi's header ("CUDA Version: 13.2", or in newer
+# drivers "CUDA UMD Version: 13.4")
+driver_cuda() {
+  nvidia-smi 2>/dev/null | sed -n 's/.*CUDA[A-Za-z ]* Version: *\([0-9][0-9.]*\).*/\1/p' | head -1 || true
+}
+
+# version_ge A B: A >= B
+version_ge() { [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$2" ]; }
+
+driver_help() {
+  if [ "$IN_WSL" = 1 ]; then
+    echo "Install NVIDIA driver $DRIVER_MIN or newer on Windows (https://www.nvidia.com/drivers), then run: wsl --shutdown"
+  else
+    echo "Install NVIDIA driver $DRIVER_MIN or newer, then reboot. On Ubuntu:"
+    echo "  sudo apt install nvidia-driver-$DRIVER_MIN-open     (or a newer nvidia-driver-*-open)"
+    echo "Other distributions: https://docs.nvidia.com/datacenter/tesla/driver-installation-guide/"
+  fi
+}
 
 site_packages() { ls -d "$R"/.venv/lib/python3*/site-packages 2>/dev/null | head -1; }
