@@ -23,6 +23,7 @@
 !/bench/
 !/QwenFlash.cmd
 !/qwenflash.sh
+!/FORK.md
 /test_qwen_thinking.py
 !/tests/
 !/exllamav3/

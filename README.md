@@ -1,5 +1,15 @@
 # Lean-QwenFlash
 
+> **This is a personal fork of [MaxDevv/lean-qwenflash](https://github.com/MaxDevv/lean-qwenflash).** The engine,
+> which runs this 125B model at full context on a 16 GB card, is MaxDevv's work. This fork adds things on top:
+> a manager with a web dashboard, setup for Windows (WSL2) and Linux, presets that size the model to the machine,
+> and a few engine fixes. It is tuned for my own setup: an RTX 5090 on Windows 11, serving my home network in
+> place of Ollama.
+>
+> MaxDevv, anything here is yours to take into upstream or to build your own improvements on.
+> **[FORK.md](FORK.md)** lists every change from upstream, which commits stand on their own, and what is personal
+> to my setup.
+
 **Qwen3.8-Flash-Next at full 262k context on 8 GB RAM and 16 GB VRAM—20 tok/s generation and 1,600 tok/s prefill.**
 
 ![Qwen3.8-Flash-Next inference showcase](media/showcase.gif)
@@ -16,7 +26,10 @@ Built on [ExLlamaV3](https://github.com/turboderp-org/exllamav3) and adapted fro
 
 ## QwenFlash (this fork)
 
-This fork adds a manager and makes the engine size itself to the machine it runs on:
+This fork adds a manager and makes the engine size itself to the machine it runs on. Everything that changed from
+upstream is listed in [FORK.md](FORK.md).
+
+![QwenFlash dashboard: model state, requests, GPU and RAM use, and activity](docs/images/dashboard.png)
 
 - **Runs on native Linux or on Windows**, where the engine lives in WSL2 and the manager runs on Windows. Any NVIDIA
   GPU from Turing on; it plans VRAM, prefill chunk and RAM cache for the card ([`sizing.py`](sizing.py)).
@@ -41,6 +54,7 @@ This fork adds a manager and makes the engine size itself to the machine it runs
 
 | | Windows 10/11 | Linux |
 |---|---|---|
+| Get it | `git clone https://github.com/eltorr/lean-qwenflash.git` (needs Git and Python 3) | same (needs Python 3) |
 | Start | double-click `QwenFlash.cmd` | `./qwenflash.sh open` |
 | Then | Setup tab: run the steps top to bottom | Setup tab, or `./qwenflash.sh setup STEP` in a terminal |
 | Clients | `http://127.0.0.1:30000/v1`, model `qwen3.8-flash-next` | same |
@@ -152,7 +166,7 @@ for your card. `./run.sh server` starts the server sized from the hardware, with
 ### 2. Install
 
 ```bash
-git clone https://github.com/MaxDevv/lean-qwenflash.git
+git clone https://github.com/eltorr/lean-qwenflash.git   # this fork; upstream: MaxDevv/lean-qwenflash
 cd lean-qwenflash
 
 python3 -m venv .venv
@@ -244,6 +258,8 @@ If I get some free time—or someone wants to contribute or put an agent on it:
 
 ## Lineage
 
+* [lean-qwenflash](https://github.com/MaxDevv/lean-qwenflash) by MaxDevv: the upstream of this fork (the engine,
+  expert store and server). This fork's additions are listed in [FORK.md](FORK.md).
 * [ExLlamaV3](https://github.com/turboderp-org/exllamav3) by turboderp (quantization format & inference runtime).
 * [glm53-flash-offload](https://github.com/sybil-solutions/glm53-flash-offload) by sybil-solutions (NVMe staging & memory tiering architecture).
 * [Qwen3.8-Flash-Next](https://github.com/QwenLM) by Alibaba Cloud Qwen team.
