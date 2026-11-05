@@ -33,6 +33,19 @@ def _run(args, timeout=20, env=None):
         return -1, "", str(e)
 
 
+def engine_cuda():
+    """The CUDA version the engine is built with: CUDA_VER in setup/lib.sh."""
+    try:
+        m = re.search(r"^CUDA_VER=([0-9.]+)", (REPO / "setup" / "lib.sh").read_text(), re.M)
+    except OSError:
+        return None
+    return m.group(1) if m else None
+
+
+def version(v):
+    return tuple(int(x) for x in re.findall(r"\d+", str(v))[:3])
+
+
 def parse_kv(text):
     return dict(line.split("=", 1) for line in text.splitlines() if "=" in line)
 
@@ -270,6 +283,11 @@ def recommend(hw, cfg):
     if hw["host"].get("in_wsl"):
         add("warn", "The manager is running inside WSL", "It can't see Windows apps' GPU use from here, so it can't "
                                                          "make room for them. Run QwenFlash.cmd on Windows instead.")
+    need, drv = engine_cuda(), (hw.get("driver") or {}).get("cuda")
+    if need and drv and version(drv) < version(need):
+        after = " on Windows, then run wsl --shutdown." if hw["host"].get("kind") == "windows-wsl" else ", then reboot."
+        add("error", f"Update the NVIDIA driver: it supports CUDA {drv}",
+            f"The engine is built with CUDA {need}. Install a driver that supports it{after}")
     cc = float(g["compute_capability"] or 0)
     vram = g["vram_total"]
     if cc < 7.5:

@@ -16,6 +16,8 @@ import psutil
 from . import hardware
 from .config import GB, IS_WINDOWS, POWERSHELL_EXE, REPO, SYSTEM32, WSL_EXE, log
 
+CUDA = hardware.engine_cuda()
+
 W = "windows-wsl"
 L = "linux"
 STEPS = [
@@ -30,12 +32,12 @@ STEPS = [
     {"id": "driver", "title": "NVIDIA driver", "platforms": [L], "blocks": False,
      "desc": "Checks the driver. Installing one needs a reboot (and key enrollment with Secure Boot), so this step "
              "shows the commands instead of running them."},
-    {"id": "base", "title": "Build tools + CUDA 12.8", "platforms": [W, L], "blocks": True, "script": "10_base.sh",
-     "desc": "Compiler, git, Python headers and NVIDIA's CUDA 12.8 toolkit (no driver packages). Needs root/sudo."},
+    {"id": "base", "title": f"Build tools + CUDA {CUDA}", "platforms": [W, L], "blocks": True, "script": "10_base.sh",
+     "desc": f"Compiler, git, Python headers and NVIDIA's CUDA {CUDA} toolkit (no driver packages). Needs root/sudo."},
     {"id": "engine", "title": "Engine + Python environment", "platforms": [W, L], "blocks": True,
      "script": "20_env.sh",
      "desc": "Puts this repo's engine code where it runs (on Windows: a clone inside WSL, updated to this "
-             "checkout's commit) and creates its Python environment with PyTorch (CUDA 12.8)."},
+             f"checkout's commit) and creates its Python environment with PyTorch (CUDA {CUDA})."},
     {"id": "build", "title": "Compile GPU kernels", "platforms": [W, L], "blocks": True, "script": "30_build.sh",
      "desc": "Builds exllamav3 and the offload kernels for this GPU's architecture. Re-run after changing GPUs."},
     {"id": "m305", "title": "Model: 3.05 bpw (fastest)", "platforms": [W, L], "blocks": False,

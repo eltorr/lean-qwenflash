@@ -53,12 +53,9 @@ step "secrets in tracked files" no_secrets
 
 # --- known vulnerabilities in the pinned packages
 PINNED=(setup/requirements.txt qwenflash/requirements.txt tools/scan-requirements.txt)
-# Accepted advisories, each with its reason. Remove one once its fix can be installed.
-#  - setuptools PYSEC-2026-3447 (sdist exclusion bypass on macOS file systems) and GHSA-xmj3-9gf7-h52w (Windows path
-#    escape in legacy wheel installs): the engine's environment is Linux, and torch 2.11 caps setuptools below 82.
-#  - torch PYSEC-2025-194 (CVE-2025-3000, memory corruption in torch.jit.script on crafted code): the engine never
-#    scripts code it is sent. The fix is in torch 2.13, which has no CUDA 12.8 build.
-IGNORE=(PYSEC-2026-3447 GHSA-xmj3-9gf7-h52w PYSEC-2025-194)
+# Accepted advisories, as advisory ids, each listed here with its reason (none at the moment). Remove one once its fix
+# can be installed.
+IGNORE=()
 audit() {
   local f rc=0 tmp
   tmp=$(mktemp)

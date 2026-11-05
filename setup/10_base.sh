@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build tools and the CUDA 12.8 toolkit. Under WSL the Windows NVIDIA driver provides the GPU, so only the toolkit
+# Build tools and the CUDA toolkit (CUDA_VER in lib.sh). Under WSL the Windows NVIDIA driver provides the GPU, so only the toolkit
 # is installed (NVIDIA's WSL repository, which has no driver packages). On native Linux the NVIDIA driver must
 # already be installed: it needs a reboot and, with Secure Boot, key enrollment, so this step only checks it.
 source "$(dirname "$0")/lib.sh"

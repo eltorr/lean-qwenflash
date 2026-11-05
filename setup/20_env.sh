@@ -39,7 +39,7 @@ cuda_env
 source .venv/bin/activate
 # file checks only: importing torch from a cold WSL page cache takes minutes
 have_env() {
-  grep -q +cu12 "$1/torch/version.py" 2>/dev/null || return 1
+  grep -q "+cu${CUDA_VER/./}" "$1/torch/version.py" 2>/dev/null || return 1   # PyTorch built for this CUDA
   for m in fastapi uvicorn safetensors jinja2 numpy ninja; do [ -e "$1/$m" ] || return 1; done
 }
 SP=$(site_packages)
@@ -49,7 +49,7 @@ ready=0
 # tampered or swapped download is refused. PyTorch's CUDA build comes from its own index, the rest from PyPI.
 echo "installing the Python packages pinned in setup/requirements.txt..."
 pip install -q --require-hashes -r setup/requirements.txt \
-  --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple
+  --index-url "https://download.pytorch.org/whl/cu${CUDA_VER/./}" --extra-index-url https://pypi.org/simple
 if [ "$ready" = 1 ]; then
   echo "Python environment ready: torch $(sed -n "s/^__version__ = '\(.*\)'/\1/p" "$SP/torch/version.py")"
   exit 0

@@ -11,7 +11,7 @@ SUDO=""
 if [ "$(id -u)" != 0 ]; then
   if sudo -n true 2>/dev/null; then SUDO="sudo"; else SUDO="NEEDS_PASSWORD"; fi
 fi
-CUDA_VER=12.8
+CUDA_VER=13.2        # the CUDA toolkit the kernels are built with; matches PyTorch's build (setup/requirements.in)
 CUDA_HOME_DEFAULT=/usr/local/cuda-$CUDA_VER
 
 need_root() {
@@ -24,8 +24,10 @@ need_root() {
 
 cuda_env() {
   if [ -f /etc/profile.d/cuda.sh ]; then source /etc/profile.d/cuda.sh; fi
-  if [ -z "${CUDA_HOME:-}" ] && [ -x "$CUDA_HOME_DEFAULT/bin/nvcc" ]; then
+  # the toolkit this engine builds with (CUDA_VER), even while cuda.sh still names an older one
+  if [ -x "$CUDA_HOME_DEFAULT/bin/nvcc" ]; then
     export CUDA_HOME=$CUDA_HOME_DEFAULT PATH=$CUDA_HOME_DEFAULT/bin:$PATH
+    export LD_LIBRARY_PATH=$CUDA_HOME_DEFAULT/lib64:${LD_LIBRARY_PATH:-}
   fi
 }
 

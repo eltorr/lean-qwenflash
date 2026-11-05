@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Regenerates the hash-pinned package lists from their inputs (needs uv: pip install uv):
-#   setup/requirements.in      -> setup/requirements.txt      the engine (Linux / WSL, Python 3.12, CUDA 12.8)
+#   setup/requirements.in      -> setup/requirements.txt      the engine (Linux / WSL, Python 3.12, CUDA 13.2)
 #   qwenflash/requirements.in  -> qwenflash/requirements.txt  the manager (Windows and Linux)
 #   tools/scan-requirements.in -> tools/scan-requirements.txt the scanners (tools/scan.sh)
 # Installs then fetch exactly these files: setup/20_env.sh and QwenFlash.cmd use pip --require-hashes.
 set -euo pipefail
 cd "$(dirname "$0")/.." || exit 1
 UV=${UV:-uv}
-TORCH_INDEX=https://download.pytorch.org/whl/cu128
+CUDA_VER=$(sed -n "s/^CUDA_VER=\([0-9.]*\).*/\1/p" setup/lib.sh)
+TORCH_INDEX=https://download.pytorch.org/whl/cu${CUDA_VER/./}
 # torch comes from PyTorch's index and the rest from PyPI; the hashes make mixing them safe
 "$UV" pip compile setup/requirements.in -o setup/requirements.txt --generate-hashes --no-header \
   --python-version 3.12 --python-platform x86_64-unknown-linux-gnu \

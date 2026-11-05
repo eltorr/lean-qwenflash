@@ -42,7 +42,7 @@ On Windows, run these as `.venv\Scripts\python -m qwenflash ...`; on Linux, as `
 | WSL memory limit | lets WSL use most of the RAM (`.wslconfig`) | - |
 | Ubuntu 24.04 | installs the distro on the drive you pick, with systemd | - |
 | NVIDIA driver | - | checks it, and shows the install commands if it's missing |
-| Build tools + CUDA 12.8 | inside WSL | uses `sudo`, or prints the command to run |
+| Build tools + CUDA 13.2 | inside WSL | uses `sudo`, or prints the command to run |
 | Engine + Python environment | a clone of this checkout inside WSL, at the same commit | this checkout |
 | Compile GPU kernels | for the local GPU (Turing to Blackwell) | same |
 | Models | 3.05 bpw (~85 GB download + 47 GB store) or 4.05 bpw (~107 + 62 GB); downloads resume | same |

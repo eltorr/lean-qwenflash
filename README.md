@@ -156,14 +156,14 @@ Qwen3.8-Flash-Next activates only 10 of its 512 experts per layer per token (~2%
 <details>
 <summary><b>Manual install, without the manager</b> (the original instructions)</summary>
 
-Requires Linux or WSL2, an NVIDIA GPU (Turing or newer), CUDA 12.4+ (12.8 for RTX 50 cards) and Python 3.10–3.12.
+Requires Linux or WSL2, an NVIDIA GPU (Turing or newer), a driver that supports CUDA 13.2 (`nvidia-smi` shows it), CUDA 13.2 and Python 3.10–3.12.
 
 ```bash
 git clone https://github.com/eltorr/lean-qwenflash.git
 cd lean-qwenflash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install torch --index-url https://download.pytorch.org/whl/cu128
+pip install torch --index-url https://download.pytorch.org/whl/cu132
 pip install fastapi uvicorn safetensors jinja2 huggingface_hub
 pip install -e exllamav3
 python compile_local.py                              # native offload extensions
