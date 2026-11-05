@@ -40,6 +40,7 @@ import sizing  # noqa: E402
 RAM_OVERHEAD = sizing.RAM_OVERHEAD
 RAM_GRACE_S = 90                 # after a start, page cache from loading takes a while to be handed back
 UI_FILE = REPO / "qwenflash" / "ui" / "index.html"
+SIGNIN_FILE = REPO / "qwenflash" / "ui" / "signin.html"   # the network port's root without the private link
 OOM_VRAM = re.compile(r"out of memory|OutOfMemoryError|VRAM LIMIT EXCEEDED|Insufficient VRAM|cudaErrorMemoryAllocation",
                       re.I)
 OOM_RAM = re.compile(r"RAM LIMIT EXCEEDED|MemoryError|Killed\b|oom-kill", re.I)
@@ -732,17 +733,22 @@ class Service:
             return
         path = target.split("?", 1)[0]
         p = path.rstrip("/") or "/"
-        # The network port (also what a tailnet reaches via `tailscale serve`) serves the API. The dashboard and
-        # control API answer there only with the dashboard token; without it, "/" stays a plain health check.
+        # The network port (also what a tailnet reaches via `tailscale serve`): /v1 is the API, and the root is the
+        # web page. The dashboard and control API answer there only with the dashboard token; without it, the root
+        # is a sign-in page that takes the private link.
         front = writer.get_extra_info("sockname")[1] == self.cfg["ollama_alias_port"]
         dash = path.startswith("/_switcher") or path == "/"
+        page = path in ("/", "/_switcher", "/_switcher/", "/_switcher/index.html")
         try:
             if dash and front and self.token_ok(headers, target):
                 await self.api(method, path, target, body, writer)
                 close(writer)
+            elif front and page and method in ("GET", "HEAD"):
+                await respond(writer, 200, SIGNIN_FILE.read_bytes(), "text/html; charset=utf-8")
+                close(writer)
             elif path.startswith("/_switcher") or (path == "/" and not front):
                 if front:
-                    await respond(writer, 404, {"error": "not found"})
+                    await respond(writer, 401, {"error": "the dashboard needs its private link"})
                 elif not self.authorized(headers, target):
                     await respond(writer, 401, b"QwenFlash dashboard: open it with ?token=<dashboard_token>",
                                   "text/plain")
@@ -756,9 +762,6 @@ class Service:
                 await self.forward(method, target, headers, body, writer)
             elif (front or path.startswith("/v1/")) and self.ollama_up:
                 await self.forward_ollama(method, target, headers, body, writer)
-            elif front and method in ("GET", "HEAD") and path == "/":
-                await respond(writer, 200, b"QwenFlash is running", "text/plain")
-                close(writer)
             elif front or path.startswith("/v1/"):
                 await respond(writer, 404, {"error": {
                     "message": f"{path} is not available: this server is QwenFlash (OpenAI-compatible: "

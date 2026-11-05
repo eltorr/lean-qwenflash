@@ -101,8 +101,8 @@ staging fits.
 
 ## Other machines
 
-Port 30000 serves the dashboard at `/` and the API at `/v1`, on `127.0.0.1` only. To reach the PC from your phone
-and other devices, use the network port:
+Every port uses the same layout: the API is under `/v1`, and the web page is at `/`. Port 30000 listens on
+`127.0.0.1` only. To reach the PC from your phone and other devices, use the network port:
 
 1. **Turn it on:** set `"ollama_alias_port": 11434` in `config.json`, then restart the service.
 2. **Expose it,** for example on a tailnet:
@@ -117,7 +117,8 @@ and other devices, use the network port:
    2. Open it once on each device; the device then remembers it.
    3. **New link** makes the old one stop working.
 
-   Without the link, the port serves only the API, and `/` answers "QwenFlash is running".
+   Without the link, the port's root shows a page where you can paste the link, and the dashboard's controls
+   refuse requests.
 
 Don't expose port 30000 itself. It trusts every connection that comes from the PC, and `tailscale serve` forwards
 connections from the PC.
