@@ -2,7 +2,7 @@
 # Compile exllamav3 and the offload kernels for the GPU in this machine (its compute capability, e.g. 8.6 for an
 # RTX 3090, 8.9 for a 4090, 12.0 for a 5090). Re-run after changing GPUs.
 source "$(dirname "$0")/lib.sh"
-cd "$R"
+cd "$R" || exit 1
 cuda_env
 source .venv/bin/activate
 CC=$(gpu_cc)
@@ -11,7 +11,8 @@ case "$CC" in
   [0-6].*|7.0|7.2) echo "compute capability $CC is too old: this engine needs Turing (7.5) or newer"; exit 13 ;;
   7.5) echo "note: Turing (7.5) runs the EXL3 kernels' sm_75 fallbacks; this combination is untested" ;;
 esac
-export TORCH_CUDA_ARCH_LIST="$CC" MAX_JOBS=$(nproc)
+MAX_JOBS=$(nproc)
+export TORCH_CUDA_ARCH_LIST="$CC" MAX_JOBS
 echo "building exllamav3 for sm_${CC/./} (a few minutes)..."
 pip install -q -e exllamav3
 echo "compiling offload extensions..."

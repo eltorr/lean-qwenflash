@@ -98,3 +98,17 @@ The rest builds in layers: sizing and `run.sh`, then setup, the manager, benchma
   git fetch upstream
   git merge upstream/master
   ```
+
+## Checks
+
+`bash tools/scan.sh` runs locally (Linux, or Git Bash on Windows) what GitHub runs on every push:
+
+- **Lint:** ruff on this fork's Python ([`ruff.toml`](ruff.toml) lists the files).
+- **Shell scripts:** shellcheck.
+- **Secrets:** tokens and keys in tracked files.
+- **Known CVEs:** pip-audit on the pinned packages.
+- **Unit tests:** the ones that need no GPU.
+
+GitHub also runs CodeQL, and Dependabot proposes updates and security fixes. To run the scan before every push, run
+`cp tools/pre-push .git/hooks/pre-push`. The hook also refuses `backup/*` branches, and commits matching a pattern in
+`.git/info/push-blocklist`, a local file for private names.

@@ -46,3 +46,6 @@
 !/research/local-expert-ram-compare/results/
 __pycache__/
 *.pyc
+!/ruff.toml
+!/tools/
+!/.github/

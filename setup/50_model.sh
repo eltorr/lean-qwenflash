@@ -8,7 +8,7 @@ case "$Q" in
   4.05) D=model-4.05; B=4.05bpw_h6_ng6; N=qwen405 ;;
   *) echo "unknown quant $Q"; exit 2 ;;
 esac
-cd "$R"
+cd "$R" || exit 1
 source .venv/bin/activate
 echo "free space: $(df -h --output=avail . | tail -1 | tr -d ' ')"
 fs=$(stat -f -c %T .)

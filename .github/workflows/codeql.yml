@@ -1,0 +1,51 @@
+# GitHub's code scanning: data-flow security analysis of this fork's code, its HTTP servers and these workflows.
+# Results appear under Security > Code scanning.
+name: CodeQL
+
+on:
+  push:
+    branches: [qwenflash]
+  pull_request:
+  schedule:
+    - cron: "41 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript-typescript, actions]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          queries: security-extended
+          config: |
+            paths:
+              - qwenflash
+              - sizing.py
+              - download_http.py
+              - qwen_server.py
+              - bin
+              - bench
+              - qwen38-flash-offload/qwen38/serve.py
+              - qwen38-flash-offload/qwen38/openai_compat.py
+              - qwen38-flash-offload/qwen38/openai_responses.py
+              - qwen38-flash-offload/qwen38/wsl_pinned.py
+              - .github/workflows
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
+        with:
+          category: /language:${{ matrix.language }}

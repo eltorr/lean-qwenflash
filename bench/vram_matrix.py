@@ -8,7 +8,8 @@ Runs on the engine side (native Linux or inside WSL) with the engine's venv pyth
 Each run is QUANT:USABLE_GB:CONTEXT[:nostage][:ram=GIB]. USABLE_GB is the VRAM the model may use, as on a smaller
 card after the desktop's share; "card" runs uncapped, as the manager would on this card (use that on real 8-24 GB
 cards). ram=GIB sets the RAM cache (default: every expert outside VRAM, up to --ram-max-gib), to measure presets with
-less or more RAM; on a 128 GB machine, e.g. 4.05:22:262144:ram=48 and 4.05:22:262144:ram=16. The engine is capped the way the upstream 16 GB numbers were measured: its VRAM limit
+less or more RAM; on a 128 GB machine, e.g. 4.05:22:262144:ram=48 and 4.05:22:262144:ram=16. The engine is capped
+the way the upstream 16 GB numbers were measured: its VRAM limit
 (QWEN_VRAM_LIMIT_BYTES) sizes the expert cache to what is in use now + USABLE_GB, and its guard
 (QWEN_VRAM_GUARD_BYTES) stops the server if device usage ever goes past that, which is what running out of memory
 would do on the real card. run.sh asks sizing.py for the chunk/staging plan of that budget.
@@ -100,7 +101,8 @@ def workload(port, context):
     # long prompt sized to the context window: prefill throughput + needle check
     n = int(min(94000, context - 6000) / TOKENS_PER_HELPER)
     filler = "".join(f"def helper_{i}(x):\n    return x * {i} + {i % 7}\n\n" for i in range(n))
-    doc = filler[: len(filler) // 2] + "\n# NOTE: the deployment password is 'violet-otter-42'.\n" + filler[len(filler) // 2:]
+    half = len(filler) // 2
+    doc = filler[:half] + "\n# NOTE: the deployment password is 'violet-otter-42'.\n" + filler[half:]
     q = doc + "\n\nWhat is the deployment password mentioned in the code? Answer in one line."
     long = chat(port, q, 1500)
     long["prefill_tps"] = long["prompt_tokens"] / long["ttft_s"] if long["ttft_s"] else None
@@ -177,7 +179,8 @@ def one(quant, usable_gb, context, port, out_dir, nostage=False, ram=None, ram_m
                     f"QWEN_VRAM_GUARD_BYTES={int(used0 + usable + 0.25 * GB)}"]
         if nostage:
             r_gb = sizing.nostage_reserve(quant, 1536) / GIB
-            env += ["QWEN_CHUNK=1536", "QWEN38_EC_STAGE_GB=0", "QWEN38_EC_ELASTIC_GB=0", f"QWEN38_EC_RESERVE_GB={r_gb:.2f}"]
+            env += ["QWEN_CHUNK=1536", "QWEN38_EC_STAGE_GB=0", "QWEN38_EC_ELASTIC_GB=0",
+                    f"QWEN38_EC_RESERVE_GB={r_gb:.2f}"]
         rec["ram_gib"] = ram_gib
         t0 = time.time()
         r = backend("start", *env, "--", "server")

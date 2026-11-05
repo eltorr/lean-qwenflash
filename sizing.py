@@ -389,7 +389,7 @@ def update_readme(path):
     text = open(path, encoding="utf-8").read()
     for name, body in (("presets", presets_table()), ("measured", measured_table())):
         text, n = re.subn(rf"(<!-- {name}:begin -->\n).*?(\n<!-- {name}:end -->)",
-                          lambda m: m.group(1) + body + m.group(2), text, flags=re.S)
+                          lambda m: m.group(1) + body + m.group(2), text, flags=re.S)  # noqa: B023 (used at once)
         if n != 1:
             raise SystemExit(f"{path}: no <!-- {name}:begin/end --> markers")
     open(path, "w", encoding="utf-8", newline="\n").write(text)

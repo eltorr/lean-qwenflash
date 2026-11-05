@@ -21,17 +21,20 @@ def fmt(v, spec="{:.1f}", none="-"):
 def main(d):
     rows = [json.loads(p.read_text()) for p in sorted(Path(d).glob("*.json"))]
     rows.sort(key=lambda r: (r["quant"], -r["usable_gb"], r["context"]))
-    print("| Card | Quant | VRAM for the model | Context | Prefill chunk | Cached experts | Expert picks VRAM / RAM / NVMe "
+    print("| Card | Quant | VRAM for the model | Context | Prefill chunk | Cached experts "
+          "| Expert picks VRAM / RAM / NVMe "
           "| Decode, median (min) | Prefill | First token | Startup |")
     print("|---|---|---|---|---|---|---|---|---|---|---|")
     for r in rows:
         e, plan, long = r.get("engine") or {}, r.get("plan") or {}, r.get("long") or {}
-        chunk = "1,536, no staging" if r.get("nostage") or plan.get("staging") is False else f"{plan.get('chunk') or 0:,}"
+        nostage = r.get("nostage") or plan.get("staging") is False
+        chunk = "1,536, no staging" if nostage else f"{plan.get('chunk') or 0:,}"
         head = (f"| {card_class(r['usable_gb'])} | {r['quant']} | {r['usable_gb']:g} GB | {r['context'] // 1024}K | "
                 f"{chunk if plan.get('ok') or r.get('nostage') else '-'} |")
         if not r.get("decode_tps_median") or r.get("error"):
             tail = r.get("log_tail") or ""
-            why = ("ran out of VRAM" + (" on the long prompt" if r.get("decode_tps_median") else " on the first request")
+            when = " on the long prompt" if r.get("decode_tps_median") else " on the first request"
+            why = ("ran out of VRAM" + when
                    if "VRAM LIMIT EXCEEDED" in tail else str(r.get("error") or "no result").splitlines()[0][:100])
             dec = f" (decode {fmt(r['decode_tps_median'])} tok/s before that)" if r.get("decode_tps_median") else ""
             print(f"{head} - | - | **fails**: {why}{dec} | - | - | {fmt(r.get('startup_s'), '{:.0f} s')} |")

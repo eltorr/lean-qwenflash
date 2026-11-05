@@ -16,7 +16,7 @@ if [ -n "$SRC" ] && [ "$(readlink -f "$SRC")" != "$(readlink -f "$R")" ]; then
     echo "cloning the engine from $SRC into $R..."
     git clone -q --branch "$BRANCH" "$SRC" "$R"
   else
-    cd "$R"
+    cd "$R" || exit 1
     if [ "$(git rev-parse HEAD)" = "$want" ]; then
       echo "engine code is current (${want:0:7})"
     else
@@ -33,7 +33,7 @@ if [ -n "$SRC" ] && [ "$(readlink -f "$SRC")" != "$(readlink -f "$R")" ]; then
   fi
 fi
 
-cd "$R"
+cd "$R" || exit 1
 cuda_env
 [ -d .venv ] || python3 -m venv .venv
 source .venv/bin/activate

@@ -1,0 +1,27 @@
+# Lints this fork's own Python (tools/scan.sh and the Checks workflow). MaxDevv's scripts and the bundled engine
+# (exllamav3, and qwen38-flash-offload apart from the files listed here) keep their own style.
+line-length = 120
+include = [
+    "qwenflash/**/*.py",
+    "tests/test_manager.py",
+    "tests/test_security.py",
+    "tests/test_sizing.py",
+    "tests/test_openai_compat.py",
+    "tests/test_openai_responses.py",
+    "bench/*.py",
+    "sizing.py",
+    "download_http.py",
+    "bin/qwenflash-timestamp",
+    "qwen38-flash-offload/qwen38/openai_compat.py",
+    "qwen38-flash-offload/qwen38/openai_responses.py",
+    "qwen38-flash-offload/qwen38/wsl_pinned.py",
+]
+
+[lint]
+# pyflakes and pycodestyle errors, likely bugs (bugbear), and the security checks that matter here: exec/eval, pickle,
+# unsafe YAML, shell=True, hard-coded /tmp paths
+select = ["E", "F", "W", "B", "S102", "S108", "S301", "S307", "S506", "S602", "S604", "S605"]
+
+[lint.per-file-ignores]
+"download_http.py" = ["E401", "E501", "E701", "E702"]   # upstream's compact style
+"tests/*" = ["S108"]                            # attack strings, not temp files

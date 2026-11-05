@@ -1,3 +1,4 @@
+# shellcheck shell=bash disable=SC2034  # sourced by the setup steps, which use its variables
 # Shared by the setup steps. They run the same way inside WSL2 (as root, started by the Windows manager) and on
 # native Linux (as your user; steps that install packages use sudo).
 set -euo pipefail
