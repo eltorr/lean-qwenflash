@@ -7,24 +7,29 @@ parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--model-dir', type=Path,
                     default=Path(os.environ.get('QWEN_WORK_ROOT','.'))/'model',
                     help='Checkpoint destination (default: ./model, or $QWEN_WORK_ROOT/model)')
-# Local patch: allow other uniform-bitrate quants (e.g. 4.05bpw_h6_ng6); the default stays pinned.
+# Local patch: allow other uniform-bitrate quants (e.g. 4.05bpw_h6_ng6), each pinned to one upload.
 parser.add_argument('--branch', default='3.05bpw_h5_ng5')
-parser.add_argument('--sha', default=None, help='Expected revision sha (pinned automatically for the default branch)')
+parser.add_argument('--sha', default=None, help='Revision to fetch (default: the pinned one for --branch)')
 args=parser.parse_args()
 root=args.model_dir.expanduser(); root.mkdir(parents=True,exist_ok=True)
 base=root.parent
 cg=Path(os.environ.get('QWEN_DOWNLOAD_CGROUP','/sys/fs/cgroup/qwen-download'))
 if os.environ.get('QWEN_DOWNLOAD_JOIN_CGROUP','0')=='1':
  (cg/'cgroup.procs').write_text(str(os.getpid()))
+# Each quant is fetched at a pinned revision, so a later upload to its branch can't change or mix an install.
+# To move to a newer upload, test it and change the sha here (or pass --sha).
+PINNED={'3.05bpw_h5_ng5':'69e33439ae950f17bcbe95c98f117d80f759ab6d',
+        '4.05bpw_h6_ng6':'55a732e0c4c3d4614bc42b68493bb930d9b02c0a'}
 repo='turboderp/Qwen3.8-Flash-Next-exl3'; branch=args.branch
-info=HfApi().model_info(repo,revision=branch,files_metadata=True)
-expect=args.sha or ('69e33439ae950f17bcbe95c98f117d80f759ab6d' if branch=='3.05bpw_h5_ng5' else None)
+rev=args.sha or PINNED.get(branch)
+assert rev, f'no pinned revision for {branch}; pass --sha'
+info=HfApi().model_info(repo,revision=rev,files_metadata=True)
 print('REVISION',branch,info.sha,flush=True)
-assert expect is None or info.sha==expect, f'revision {info.sha} != expected {expect}'
+assert info.sha==rev, f'revision {info.sha} != expected {rev}'
 chunk=64*1024**2; jobs=[]; files={}; lock=threading.Lock()
 for s in info.siblings:
  if (root/s.rfilename).exists(): continue
- size=s.size; u=f'https://huggingface.co/{repo}/resolve/{branch}/{s.rfilename}'
+ size=s.size; u=f'https://huggingface.co/{repo}/resolve/{info.sha}/{s.rfilename}'
  with urllib.request.urlopen(urllib.request.Request(u,method='HEAD')) as r: url=r.geturl()
  part=root/(s.rfilename+'.http-part'); state=root/(s.rfilename+'.http-state.json')
  fd=os.open(part,os.O_CREAT|os.O_RDWR|os.O_DIRECT,0o644)
