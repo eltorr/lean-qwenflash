@@ -22,7 +22,13 @@ from .httpio import http_get_json, http_ok
 
 
 def service_url(cfg):
+    """Base of the dashboard's control API (append api/...)."""
     return f"http://127.0.0.1:{cfg['listen_port']}/_switcher/"
+
+
+def dashboard_url(cfg):
+    """The dashboard, at the root of the port that serves the API on /v1."""
+    return f"http://127.0.0.1:{cfg['listen_port']}/"
 
 
 def cmd_serve(cfg, a):
@@ -32,7 +38,7 @@ def cmd_serve(cfg, a):
     if http_ok(service_url(cfg) + "api/status", 1.5):
         if a.open:
             from .host import make_host
-            make_host(cfg).open_ui(service_url(cfg))
+            make_host(cfg).open_ui(dashboard_url(cfg))
         else:
             print(f"QwenFlash is already running on port {cfg['listen_port']}")
         return 0
@@ -60,7 +66,7 @@ def cmd_open(cfg, a):
                 break
             time.sleep(0.5)
     from .host import make_host
-    make_host(cfg).open_ui(url)
+    make_host(cfg).open_ui(dashboard_url(cfg))
     return 0
 
 

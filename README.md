@@ -48,7 +48,7 @@ cd lean-qwenflash
 ./qwenflash.sh open
 ```
 
-The dashboard opens at http://127.0.0.1:30000/_switcher/. In its **Setup** tab:
+The dashboard opens at http://127.0.0.1:30000 (the same port as the API). In its **Setup** tab:
 
 1. It detects the OS, GPU, RAM and drive, and recommends a preset. Click **Apply baseline**.
 2. Run the steps from top to bottom. Each can be run again safely.

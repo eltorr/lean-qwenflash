@@ -817,10 +817,7 @@ class Service:
         }
 
     async def api(self, method, path, target, body, writer):
-        if path == "/":
-            await respond(writer, 302, b"", "text/plain", ("Location: /_switcher/",))
-            return
-        if path in ("/_switcher", "/_switcher/", "/_switcher/index.html"):
+        if path in ("/", "/_switcher", "/_switcher/", "/_switcher/index.html"):  # the dashboard, at the root
             extra = ()
             m = re.search(r"token=([\w-]+)", target)
             if m:
@@ -1062,7 +1059,7 @@ class Service:
             if t:
                 self.spawn(self.start(t, "preload on launch"))
         if open_window:
-            self.host.open_ui(f"http://127.0.0.1:{cfg['listen_port']}/_switcher/")
+            self.host.open_ui(f"http://127.0.0.1:{cfg['listen_port']}/")
         async with server:
             await self.quit.wait()
         if self.host.follower:
