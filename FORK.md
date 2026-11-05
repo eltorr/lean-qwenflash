@@ -116,7 +116,7 @@ Only a few upstream files changed. Everything else is new.
 | `qwen_server.py` | The prefill chunk can come from `QWEN_CHUNK` (default unchanged, 24576). |
 | `download_http.py` | `--branch` and `--sha` fetch other quants (e.g. 4.05 bpw). |
 | `.gitignore`, new `.gitattributes` | The allow-list includes the fork's files; files that run inside Linux keep LF endings on Windows checkouts. |
-| `README.md` | Fork notice, the QwenFlash section with presets and measurements, requirements, To-Do status. Upstream's text is otherwise kept. |
+| `README.md` | Fork notice, differences table, credit, the fork's setup section with presets and measurements, requirements, To-Do status. Upstream's text is otherwise kept (its intro under *About the engine*). |
 
 Every default is unchanged unless the new environment variables are set.
 

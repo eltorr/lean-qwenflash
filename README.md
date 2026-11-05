@@ -1,14 +1,57 @@
-# Lean-QwenFlash
+# Lean-QwenFlash (eltorr's fork)
 
-> **This is a personal fork of [MaxDevv/lean-qwenflash](https://github.com/MaxDevv/lean-qwenflash).** The engine,
-> which runs this 125B model at full context on a 16 GB card, is MaxDevv's work. This fork adds things on top:
-> a manager with a web dashboard, setup for Windows (WSL2) and Linux, presets that size the model to the machine,
-> and a few engine fixes. It is tuned for my own setup: an RTX 5090 on Windows 11, serving my home network in
-> place of Ollama.
+> **This is a personal fork of [MaxDevv/lean-qwenflash](https://github.com/MaxDevv/lean-qwenflash), with
+> additions.** The engine is MaxDevv's work. It runs Qwen3.8-Flash-Next, a 125B mixture-of-experts model, at full
+> 262K context on a 16 GB card by streaming experts from NVMe. This fork keeps that engine and adds:
+>
+> - a manager with a web dashboard;
+> - setup for Windows (WSL2) and Linux;
+> - presets that size the model to the machine;
+> - a few engine fixes.
+>
+> It is tuned for my own setup: an RTX 5090 on Windows 11, serving my home network in place of Ollama.
 >
 > MaxDevv, anything here is yours to take into upstream or to build your own improvements on.
-> **[FORK.md](FORK.md)** lists every change from upstream, which commits stand on their own, and what is personal
-> to my setup.
+
+![QwenFlash dashboard: model state, requests, GPU and RAM use, and activity](docs/images/dashboard.png)
+
+## Differences from the original
+
+| | [Original](https://github.com/MaxDevv/lean-qwenflash) | This fork |
+|---|---|---|
+| **Engine** | Direct-from-SSD expert offloading, packed expert store, OpenAI server | The same engine, plus fixes:<ul><li>pinned memory under WSL2</li><li>prefill staging sized per layer, so 4.05 bpw works</li><li>configurable VRAM limits</li><li>kernels built for the local GPU</li><li>a RAM guard that works without a memory cgroup</li><li>OpenAI `reasoning_effort` values mapped (`high` gave HTTP 500)</li></ul> |
+| **Platforms** | Linux | Linux, and Windows 10/11 (engine in WSL2, manager on Windows) |
+| **Cards** | Tuned and measured for 16 GB (RTX 4090 capped, RTX 3080 Laptop) | Sized for 8-48 GB; measured at 8-32 GB (RTX 5090 capped to each size) |
+| **Quants** | 3.05 bpw | 3.05 and 4.05 bpw |
+| **Settings** | Server flags chosen by hand | Picked by `sizing.py`. Presets set quant, context and RAM cache from VRAM + RAM, and `./run.sh server` starts a server sized to the card |
+| **Install** | Manual steps | Setup tab or `qwenflash setup`:<ul><li>Windows: WSL and Ubuntu</li><li>CUDA 12.8 and the Python environment</li><li>kernel build</li><li>model download and packing</li></ul> |
+| **Running** | Start `qwen_server.py`; it runs until stopped | A manager service:<ul><li>starts the model on the first request</li><li>scales back or pauses for games and other GPU apps</li><li>restarts after a crash</li><li>keeps the model up across its own restarts</li></ul> |
+| **API** | OpenAI-compatible on port 30000 | The same, plus an Ollama-style front door on port 11434 that passes other models through to Ollama |
+| **Monitoring** | Terminal output | Local web dashboard (loopback only): state, speed, GPU/RAM over time, settings, setup, logs |
+| **Benchmarks** | 4090 / 3080 table | Adds a VRAM-scaling benchmark, a preset matrix by VRAM and RAM, and reports |
+
+[FORK.md](FORK.md) has the full list: every upstream file changed, every commit, and the standalone engine-fix
+commits that upstream can cherry-pick. It also covers what is personal to my setup and what is verified.
+
+## Credit
+
+- **[lean-qwenflash](https://github.com/MaxDevv/lean-qwenflash) by MaxDevv** is the engine this fork is built on:
+  direct-from-SSD expert offloading, the packed expert store, the OpenAI server, and the original benchmarks and
+  documentation. Upstream's README text is kept below, from *About the engine* on.
+- Through upstream:
+  - [ExLlamaV3](https://github.com/turboderp-org/exllamav3) by turboderp;
+  - [glm53-flash-offload](https://github.com/sybil-solutions/glm53-flash-offload) by sybil-solutions;
+  - [Qwen3.8-Flash-Next](https://github.com/QwenLM) by the Qwen team.
+
+  See [Lineage](#lineage).
+- **Licenses:** upstream has no top-level license file yet, so this fork doesn't add one. The bundled ExLlamaV3 and
+  offload code keep their MIT licenses.
+
+---
+
+## About the engine
+
+*From the original README.*
 
 **Qwen3.8-Flash-Next at full 262k context on 8 GB RAM and 16 GB VRAM—20 tok/s generation and 1,600 tok/s prefill.**
 
@@ -24,33 +67,7 @@ Built on [ExLlamaV3](https://github.com/turboderp-org/exllamav3) and adapted fro
 
 ---
 
-## QwenFlash (this fork)
-
-This fork adds a manager and makes the engine size itself to the machine it runs on. Everything that changed from
-upstream is listed in [FORK.md](FORK.md).
-
-![QwenFlash dashboard: model state, requests, GPU and RAM use, and activity](docs/images/dashboard.png)
-
-- **Runs on native Linux or on Windows**, where the engine lives in WSL2 and the manager runs on Windows. Any NVIDIA
-  GPU from Turing on; it plans VRAM, prefill chunk and RAM cache for the card ([`sizing.py`](sizing.py)).
-- **Manager with a local web dashboard.**
-  - Serves an OpenAI-compatible endpoint and an Ollama-style front door.
-  - Loads the model when it's called, scales it back or pauses it when games or other GPU apps need the card, and
-    re-saturates afterwards.
-  - Recovers from crashes, and learns lower limits after running out of memory.
-  - Keeps the model running across its own restarts.
-  - Shows live speed.
-- **Setup that detects the platform.** It handles WSL install and `.wslconfig` on Windows, and checks the driver on
-  Linux. It recommends settings for the hardware, then runs the build and model steps. Each step can also be run
-  from a terminal.
-- **Engine fixes:**
-  - VRAM/RAM limits are configurable.
-  - Pinned memory works under WSL2.
-  - Prefill staging is sized per layer (4.05 bpw no longer overflows).
-  - OpenAI `reasoning_effort` values are accepted.
-  - Kernels are built for the local GPU.
-  - The RAM guard tolerates a missing cgroup.
-  - `run.sh` launches on any card; `bin/qwenflash-backend` runs the server detached.
+## Using this fork
 
 | | Windows 10/11 | Linux |
 |---|---|---|
@@ -58,6 +75,10 @@ upstream is listed in [FORK.md](FORK.md).
 | Start | double-click `QwenFlash.cmd` | `./qwenflash.sh open` |
 | Then | Setup tab: run the steps top to bottom | Setup tab, or `./qwenflash.sh setup STEP` in a terminal |
 | Clients | `http://127.0.0.1:30000/v1`, model `qwen3.8-flash-next` | same |
+
+The Setup tab shows what it detected, this machine's preset, and each setup step:
+
+![Setup tab: detected hardware, the preset for this machine, and the setup steps](docs/images/dashboard-setup.png)
 
 Guides: [manager](docs/manager.md) · [API](docs/api.md) · [VRAM scaling results](research/vram-scaling/REPORT.md) ·
 [multi-GPU notes](docs/research/multi-gpu.md).
