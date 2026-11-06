@@ -26,6 +26,12 @@ From the manager's log and the new benchmark ([report](research/vram-scaling-tor
   about 2.1 GB free, before the engine counted the VRAM CUDA can't see under WSL2.
 - **Benchmarks** size the RAM cache the same way, and a model restarted after one gets its RAM cache back.
 
+### Fixes
+
+- **Benchmarks:** a first token in under half a millisecond rounded to 0.000 s and its prompt-reading speed was
+  dropped. It is now computed from the unrounded time. Only the tests' fake engine is that fast (GitHub's runner
+  caught it).
+
 ### Docs
 
 - **The ~5.5 s per staged prompt** was the NVMe, not staging itself: the report, README and manager guide say so now.

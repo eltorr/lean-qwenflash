@@ -228,6 +228,15 @@ class BenchTests(unittest.TestCase):
         self.assertEqual(len(r["prefill"]["8192"]["runs"]), 3)
         self.assertEqual(set(r["prefill"]), {"1024", "8192", "32768"})          # 64K doesn't fit in a 64K context
 
+    def test_a_first_token_faster_than_a_millisecond_still_counts(self):
+        import unittest.mock
+        clock = (100.0 + i * 1e-4 for i in range(1000))                 # 0.1 ms between readings
+        with unittest.mock.patch.object(bench.time, "perf_counter", lambda: next(clock)):
+            client = bench.Client(self.server.server_address[1], KEY)
+            a = client.answer("Trial 0: Explain how a jet engine works in three concise paragraphs.")
+        self.assertEqual(a["ttft_s"], 0.0)
+        self.assertGreater(a["prefill_tps"], 0)                                 # not dropped as "no measurement"
+
     def test_an_emulated_card_gets_its_limit_guard_and_settings(self):
         self.run_bench(["3.05:10.5:131072:nostage:ram=12"])
         env = self.svc.host.envs[0]

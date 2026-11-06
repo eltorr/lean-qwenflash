@@ -205,7 +205,10 @@ class Client:
                 last = t
                 text.append(d.get("content") or "")
         n, p = int((usage or {}).get("completion_tokens") or 0), int((usage or {}).get("prompt_tokens") or 0)
-        return {"prompt_tokens": p, "completion_tokens": n, "ttft_s": round(first - t0, 3) if first else None,
+        ttft = first - t0 if first else None
+        return {"prompt_tokens": p, "completion_tokens": n, "ttft_s": round(ttft, 3) if ttft is not None else None,
+                # from the unrounded time: a fast first token rounds to 0.000 s
+                "prefill_tps": round(p / max(ttft, 1e-6), 1) if ttft is not None and p else None,
                 "decode_tps": round((n - 1) / (last - first), 2) if first and last and last > first and n > 1 else None,
                 "wall_s": round(time.perf_counter() - t0, 1), "answer": "".join(text)}
 
@@ -773,10 +776,7 @@ class Bench:
 
         async def ask(text):
             check()
-            a = await asyncio.to_thread(client.answer, text)
-            ok = a["ttft_s"] and a["prompt_tokens"]
-            a["prefill_tps"] = round(a["prompt_tokens"] / a["ttft_s"], 1) if ok else None
-            return a
+            return await asyncio.to_thread(client.answer, text)
         for text in WARMUP:                                           # not scored
             await ask(text)
         answers, docs = [], {}
@@ -802,7 +802,7 @@ class Bench:
         rates = [a["decode_tps"] for a in answers if a["decode_tps"]]
         rec["decode_tps_median"] = round(statistics.median(rates), 2) if rates else None
         rec["decode_tps_min"] = min(rates) if rates else None
-        ttfts = [a["ttft_s"] for a in answers if a["ttft_s"]]
+        ttfts = [a["ttft_s"] for a in answers if a["ttft_s"] is not None]
         rec["short_ttft_median_s"] = round(statistics.median(ttfts), 3) if ttfts else None
         save()
         if wl["retrieval"]:
