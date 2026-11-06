@@ -40,6 +40,9 @@ From the manager's log and the new benchmark ([report](research/vram-scaling-tor
   runs (20 tok/s here), and `sizing.py` offering it is on the list. The capped rows' prefill figures predate the
   change, which the README notes.
 - **FORK.md** and the run records list the tuning and the follow-up.
+- **README tables:** the 4.05 bpw whole-card row with a 34 GiB RAM cache, this PC's own setup, now has the
+  follow-up's figures (5,312 tok/s prefill, 59.7 tok/s decode). The other rows wait for the matrix to be measured
+  again.
 
 ## 2026-11-05
 

@@ -71,7 +71,7 @@ two safety changes: the model server refuses web pages, and it never runs code f
 
 | File (`qwen38/` is `qwen38-flash-offload/qwen38/`) | Change |
 |---|---|
-| `qwen38/nv2.py`, `nv_tier.py`, `k_lookahead.py`, `exl3_tiers.py` (+ `wsl_pinned.py`) | Pinned host memory works under WSL2 |
+| `qwen38/nv2.py`, `nv_tier.py`, `k_lookahead.py`, `exl3_tiers.py` (+ `wsl_pinned.py`) | Pinned host memory works under WSL2, through the CUDA runtime PyTorch loaded |
 | `qwen38/nv2.py`, `cpu_tier.py` | Built as C++20, which PyTorch 2.15's headers need |
 | `qwen38/expert_cache.py` | Prefill staging holds a whole layer, so 4.05 bpw fits; the VRAM limit counts what CUDA can't see under WSL2 |
 | `qwen38/serve.py` (+ `openai_compat.py`, `openai_responses.py`) | `reasoning_effort` mapping; the Responses API; `trust_remote_code` off |

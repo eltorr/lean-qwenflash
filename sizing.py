@@ -309,12 +309,14 @@ def measured_for(b):
 # cache the run had; capped: the engine was held to that card size on a bigger card (VRAM capacity only: a real card
 # of that size has less bandwidth). Add rows as real cards and other RAM sizes are measured (`qwenflash bench`,
 # then `qwenflash bench --sizing FOLDER` prints rows in this format).
-# prefill: the long document (the original's retrieval test, up to 100K tokens); decode: short answers, thinking off
+# prefill: the long document (the original's retrieval test, up to 100K tokens); decode: short answers, thinking off.
+# The 4.05 whole-card 34 GiB row is from the report's 2026-11-06 follow-up (short prompts skip staging); the others
+# are from before it, so their prefill is low.
 _R5090_FULL = {"ram": 64, "platform": "windows-wsl", "gpu": "RTX 5090", "source": "research/vram-scaling-torch-2.15"}
 _R5090 = dict(_R5090_FULL, capped=True)
 MEASURED = [
     dict(_R5090_FULL, card=32, quant="3.05", context=262144, ram_cache_gib=26, decode=72.1, prefill=4668),
-    dict(_R5090_FULL, card=32, quant="4.05", context=262144, ram_cache_gib=34, decode=60.9, prefill=4364),
+    dict(_R5090_FULL, card=32, quant="4.05", context=262144, ram_cache_gib=34, decode=59.7, prefill=5312),
     dict(_R5090_FULL, card=32, quant="4.05", context=262144, ram_cache_gib=40, decode=61.0, prefill=4233),
     dict(_R5090, card=32, quant="3.05", context=262144, ram_cache_gib=38, decode=74.4, prefill=4722),
     dict(_R5090, card=24, quant="3.05", context=262144, ram_cache_gib=38, decode=62.5, prefill=4628),
