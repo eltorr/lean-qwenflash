@@ -83,7 +83,9 @@ again syncs the WSL clone; only committed code is synced.
     full -> lean -> full doesn't repeat.
   - A full model whose RAM cache was sized while RAM was short grows it, with a restart, once 8 GiB more fits.
 - **Short prompts** (up to 1,638 tokens, or each new turn of a conversation that adds no more) skip prefill
-  staging, which costs about 5.5 s per prompt whatever its size.
+  staging. Staging reads every expert that is in neither VRAM nor the RAM cache from the NVMe, and doesn't keep it;
+  short prompts read what they need and keep it in the RAM cache, so longer prompts after them read from RAM. A
+  1-2K-token prompt gets its first token in 1.4-2.6 s instead of 6-7.
 - **Thresholds:** all are in Settings, scaled to the card; 0 means automatic.
 
 [`sizing.py`](../sizing.py) turns a VRAM budget into a plan: the expert cache, the prefill chunk, and whether

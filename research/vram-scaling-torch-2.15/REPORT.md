@@ -111,7 +111,8 @@ cache starts empty and only decode filled it, so every staged prompt read most o
 
 Prompts under 16,384 expert picks per layer (1,638 tokens; nv2's pick buffer holds 16,384) now skip staging. They go
 through nv2's per-pick path, which keeps what it reads in the RAM cache, so later staged prompts read from RAM. Same
-card and settings (4.05 bpw, whole card, standard workload, commit `6e0f68c`):
+card and settings (4.05 bpw, whole card, standard workload, commit `6e0f68c`; results in
+[followup-2026-11-06/](followup-2026-11-06/)):
 
 | | Matrix (staging from 512 picks) | Staging from 16,384 picks |
 |---|---|---|
@@ -124,8 +125,9 @@ card and settings (4.05 bpw, whole card, standard workload, commit `6e0f68c`):
 
 On the live service, prompts of 1,375-1,712 tokens got their first token in 1.4 s and 2,000 tokens in 2.6 s, against
 5.6-7.1 s before; 1,628 tokens ran unstaged and 1,642 staged, both without errors. Filling the RAM cache from the NVMe
-at startup instead (the engine's warm start, 5.4 s for 14,854 experts) helped only the first trial's 1K document
-(312 to 446 tok/s) and added 6 s to every start, so it stays off.
+at startup instead (the engine's warm start, 5.4 s for 14,854 experts; tried with a local change only, recorded in
+`4.05-card-256k-stage16384-warmstart.json`) helped only the first trial's 1K document (312 to 446 tok/s) and added
+6 s to every start, so it stays off.
 
 The capped rows above were measured before this change; their prefill figures are low for the same reason.
 

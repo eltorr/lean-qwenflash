@@ -19,12 +19,12 @@ Clone it and make it your own. Just keep the credit to MaxDevv, whose engine it'
 |---|---|---|
 | **Running** | Start `qwen_server.py` by hand | A service: loads on the first request, scales back or pauses for games, restarts after a crash |
 | **Setup** | Manual steps, Linux | A Setup tab on Windows (WSL2) and Linux that detects the machine and runs each step |
-| **Sizing** | Flags set by hand, tuned for 16 GB | Presets pick the quant, context and RAM cache for 8-48 GB cards |
+| **Sizing** | Flags set by hand, tuned for 16 GB | Presets pick the quant, context and RAM cache for 8-48 GB cards; short prompts skip prefill staging, so a 1-2K-token prompt starts in 1.4-2.6 s instead of 6-7 |
 | **Quants** | 3.05 bpw | 3.05 and 4.05 bpw |
 | **API** | OpenAI Chat Completions | Adds the OpenAI Responses API ([what's new](FORK.md#api-whats-original-and-whats-new)) |
 | **Monitoring** | Terminal output | A local web dashboard |
 | **Benchmarks** | `benchmark.py`, started by hand | A Benchmark tab and `qwenflash bench`: any configuration, with the stack recorded and compared with the last run ([records](research/README.md)) |
-| **Engine** | | A few fixes: pinned memory under WSL2, 4.05 bpw prefill, configurable VRAM limits, kernels built for the local GPU, OpenAI `reasoning_effort` values |
+| **Engine** | | A few fixes: pinned memory under WSL2, VRAM limits that count what CUDA can't see under WSL2, 4.05 bpw prefill, configurable VRAM limits, kernels built for the local GPU, OpenAI `reasoning_effort` values |
 | **Stack** | PyTorch 2.11, CUDA 12.8 | PyTorch 2.15, CUDA 13.2: prefill 47-72% faster, decode the same ([report](research/torch-2.15/REPORT.md)) |
 | **Security** | Listens on localhost | A sign-in token for the dashboard, other websites refused, a model server only the manager can call, packages pinned by hash, verified downloads |
 | **Checks** | | Lint, shellcheck, secret and CVE scans and unit tests, locally and on every push |
@@ -196,7 +196,9 @@ network, with no sign-in, so keep that to a private network.
 ## To do
 
 - Measure real 8-24 GB cards, and 16-32 GB and 128 GB of RAM. Next up: 128 GB of RAM with a 24 GB card.
-- Shrink the ~6.2 GB fixed footprint, so that an 8 GB card that also drives a desktop can run the model.
+- Offer 8 GB cards that also drive a desktop: one now runs here at 20 tok/s with 7 GB, but `sizing.py` still refuses
+  it. Shrinking the ~6.2 GB fixed footprint would give it an expert cache.
+- Measure the capped rows again: their prefill figures predate short prompts skipping staging.
 - Use a single staging buffer, for faster prefill on 12-16 GB cards.
 - Support two GPUs; a layer split looks like the best fit ([notes](docs/research/multi-gpu.md)).
 

@@ -4,7 +4,7 @@ Every benchmark behind the numbers in this repo, newest first. Each folder has a
 
 | Date | By | Machine | Stack | What it measured | Record |
 |---|---|---|---|---|---|
-| 2026-11-05 | this fork | RTX 5090, capped to 7-32 GB and uncapped, 64 GB RAM, WSL2 | PyTorch 2.15, CUDA 13.2 | VRAM scaling: the README's tables, measured the way the original's `benchmark.py` does | [vram-scaling-torch-2.15](vram-scaling-torch-2.15/REPORT.md) |
+| 2026-11-05 | this fork | RTX 5090, capped to 7-32 GB and uncapped, 64 GB RAM, WSL2 | PyTorch 2.15, CUDA 13.2 | VRAM scaling: the README's tables, measured the way the original's `benchmark.py` does. Follow-up 2026-11-06: short prompts skip staging (documents read 1.2-5 times faster) | [vram-scaling-torch-2.15](vram-scaling-torch-2.15/REPORT.md) |
 | 2026-11-05 | this fork | RTX 5090, 64 GB RAM, WSL2 | 2.11 / 12.8 vs 2.15 / 13.2 | The stack upgrade: prefill 47-72% faster, decode the same | [torch-2.15](torch-2.15/REPORT.md) |
 | 2026-11-04 | this fork | RTX 5090, capped to 8-32 GB | PyTorch 2.11, CUDA 12.8 | VRAM scaling, replaced by vram-scaling-torch-2.15. Decode answers were capped at 700 tokens | [vram-scaling](vram-scaling/REPORT.md) |
 | 2026-11-03 | this fork | RTX 5090, 64 GB RAM, WSL2 | PyTorch 2.11, CUDA 12.8 | 3.05 vs 4.05 bpw on the full card, replaced by vram-scaling-torch-2.15. Decode answers were capped at 700 tokens | [rtx5090-wsl](rtx5090-wsl/REPORT.md) |

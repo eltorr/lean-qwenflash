@@ -17,13 +17,15 @@ standalone commits that apply to the original too; see [Taking changes upstream]
 - **Manager** ([`qwenflash/`](qwenflash), [guide](docs/manager.md)). It runs the model as a service:
   - loads it on the first request;
   - picks a full or lean profile from the free VRAM and RAM;
-  - scales back or pauses for games, and comes back when they're done;
+  - scales back or pauses for games, and comes back when they're done, without flapping between profiles;
+  - keeps the RAM cache to what pays (90% of the experts with VRAM) and keeps it across restarts;
   - restarts it after a crash, using smaller limits after running out of memory;
   - shows it all on a local dashboard.
 - **Setup** ([`setup/`](setup), [`qwenflash/setup.py`](qwenflash/setup.py)). It detects Windows or Linux and runs
   each install step, from the dashboard or a terminal.
 - **Sizing and presets** ([`sizing.py`](sizing.py), [`run.sh`](run.sh)). They pick the quant, context and RAM cache
-  from the VRAM and RAM. The README's tables are generated from it.
+  from the VRAM and RAM, and let prompts of up to 1,638 tokens skip prefill staging (`QWEN38_EC_STAGE_MIN`). The
+  README's tables are generated from it.
 - **Benchmarks** ([guide](docs/manager.md#benchmarks), [run records](research/README.md)). The dashboard's
   Benchmark tab and `qwenflash bench` measure any configuration on this machine, including smaller cards emulated on a
   bigger one, and record the stack. A run steps aside while a game needs the GPU, and a benchmark cut short resumes.

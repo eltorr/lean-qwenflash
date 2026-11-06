@@ -26,6 +26,15 @@ From the manager's log and the new benchmark ([report](research/vram-scaling-tor
   about 2.1 GB free, before the engine counted the VRAM CUDA can't see under WSL2.
 - **Benchmarks** size the RAM cache the same way, and a model restarted after one gets its RAM cache back.
 
+### Docs
+
+- **The ~5.5 s per staged prompt** was the NVMe, not staging itself: the report, README and manager guide say so now.
+  The report's follow-up has the A/B and its raw results.
+- **README:** the differences table and the to-do list cover the new tuning; an 8 GB card that drives a desktop now
+  runs (20 tok/s here), and `sizing.py` offering it is on the list. The capped rows' prefill figures predate the
+  change, which the README notes.
+- **FORK.md** and the run records list the tuning and the follow-up.
+
 ## 2026-11-05
 
 ### Security
