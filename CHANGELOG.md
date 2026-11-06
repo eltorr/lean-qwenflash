@@ -53,6 +53,7 @@ From two security reviews of the fork's code.
 - **The PC comes first:** when a game or another app needs the GPU, or RAM nearly runs out, the run steps aside and
   starts again once the PC is free. A benchmark cut short by a cancel, a restart or a reboot resumes where it stopped
   (`qwenflash bench --resume`, or the tab's Resume button).
+- **The dashboard says Benchmarking** while one runs, not Paused, and the start and pause buttons are off until it ends.
 - **Output is never capped:** the old runner cut answers at 400-1,500 tokens.
 - **Run records:** [research/README.md](research/README.md) lists every benchmark with its date, machine and stack.
 
