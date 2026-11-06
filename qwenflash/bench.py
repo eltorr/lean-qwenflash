@@ -21,7 +21,7 @@ a jet engine works in three concise paragraphs") and documents of his filler tex
 sentence. Each trial's text differs from the start, so nothing comes from the prefix cache.
   quick     1 trial: the answer, documents of 1K and 8K tokens                                   ~2 min a run
   standard  3 trials: the answer, documents of 1K, 8K, 32K and 64K tokens; then his retrieval
-            test: three access codes at 10%, 50% and 90% of a document of up to 100K tokens      ~5-10 min a run
+            test: three access codes at 10%, 50% and 90% of a document of up to 100K tokens       ~3-6 min a run
 Documents that don't fit the run's context are skipped; the retrieval document is sized to it.
 
 The PC comes first. When a game or another app needs the GPU (a watched app, another app's GPU load, or its VRAM

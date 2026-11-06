@@ -371,7 +371,7 @@ def main(argv=None):
     b.add_argument("runs", nargs="*", help="presets: current (default), lean, quants, matrix; or "
                                            "QUANT:VRAM_GB|card:CONTEXT[:nostage][:ram=GIB]")
     b.add_argument("--workload", choices=("quick", "standard"), default="standard",
-                   help="quick: ~2 min a run; standard: ~5-10 min a run (default); both follow the original's "
+                   help="quick: ~2 min a run; standard: ~3-6 min a run (default); both follow the original's "
                         "benchmark.py")
     b.add_argument("--resume", action="store_true",
                    help="continue the latest unfinished benchmark: its runs left, into its folder")

@@ -36,6 +36,7 @@
 !/research/rtx5090-wsl/
 !/research/vram-scaling/
 !/research/torch-2.15/
+!/research/vram-scaling-torch-2.15/
 !/research/README.md
 /research/4090-final/*
 !/research/4090-final/REPORT.md

@@ -51,7 +51,7 @@ From two security reviews of the fork's code.
   - each result records the machine and its stack, and the change since the last run of the same configuration;
   - it measures the way the original's `benchmark.py` does, so results compare with MaxDevv's: thinking off, greedy
     decoding, his prompts and filler documents (1K-64K tokens), and his retrieval test. Answers end on their own after
-    about 250 tokens, so a run takes 5-10 minutes and the matrix about 2 hours. A first try with thinking on and
+    about 250 tokens, so a run takes 3-6 minutes and the matrix about an hour. A first try with thinking on and
     open-ended prompts wrote 12,000-55,000 tokens an answer and would have taken over a day;
   - every matrix run gets the same 38 GiB RAM cache, as the earlier matrix. Sized from the RAM free when each run
     started, it varied from 8 to 25 GiB with how much memory WSL had handed back from the run before.
@@ -61,6 +61,12 @@ From two security reviews of the fork's code.
 - **The dashboard says Benchmarking** while one runs, not Paused, and the start and pause buttons are off until it ends.
 - **Output is never capped:** the old runner cut answers at 400-1,500 tokens.
 - **Run records:** [research/README.md](research/README.md) lists every benchmark with its date, machine and stack.
+- **The README's tables, measured again** on PyTorch 2.15 with the new method
+  ([report](research/vram-scaling-torch-2.15/REPORT.md)):
+  - 3.05 bpw decodes 74 tok/s on 30 GB of VRAM, down to 20 on 7 GB; 4.05 decodes 63 down to 30 tok/s;
+  - an 8 GB card that drives a display now runs (20 tok/s here), where it ran out of VRAM on PyTorch 2.11;
+  - a staged prompt costs about 5.5 s whatever its size, so prompts under 8-32K tokens read slower than the tables'
+    long-document figures.
 
 ### Engine
 

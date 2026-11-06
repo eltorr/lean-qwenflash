@@ -79,12 +79,12 @@ The figures are for Linux; Windows keeps about 8 GB more RAM for itself.
 <!-- presets:begin -->
 | Card (VRAM) | 16 GB RAM | 32 GB RAM | 64 GB RAM | 128 GB RAM |
 |---|---|---|---|---|
-| **8 GB, no display** | **3.05** · 16K, no staging<br>4 GiB RAM cache, 10% in memory<br>⚪ not tested | **3.05** · 16K, no staging<br>15 GiB RAM cache, 36% in memory<br>⚪ not tested | **3.05** · 16K, no staging<br>42 GiB RAM cache, all in memory<br>✅ *20.2 tok/s* · RTX 5090 capped to 8 GB | **3.05** · 16K, no staging<br>42 GiB RAM cache, all in memory<br>✅ *20.2 tok/s* · RTX 5090 capped to 8 GB, 64 GB RAM |
+| **8 GB, no display** | **3.05** · 16K, no staging<br>4 GiB RAM cache, 10% in memory<br>⚪ not tested | **3.05** · 16K, no staging<br>15 GiB RAM cache, 36% in memory<br>⚪ not tested | **3.05** · 16K, no staging<br>42 GiB RAM cache, all in memory<br>✅ *26.4 tok/s* · RTX 5090 capped to 8 GB | **3.05** · 16K, no staging<br>42 GiB RAM cache, all in memory<br>✅ *26.4 tok/s* · RTX 5090 capped to 8 GB, 64 GB RAM |
 | **8 GB, with display** | not enough VRAM | not enough VRAM | not enough VRAM | not enough VRAM |
 | **12 GB** | **3.05** · 64K, no staging<br>4 GiB RAM cache, 15% in memory<br>⚪ not tested | **3.05** · 64K, no staging<br>15 GiB RAM cache, 41% in memory<br>⚪ not tested | **3.05** · 64K, no staging<br>40 GiB RAM cache, all in memory<br>⚪ not tested | **3.05** · 64K, no staging<br>40 GiB RAM cache, all in memory<br>⚪ not tested |
-| **16 GB** | **3.05** · 256K<br>4 GiB RAM cache, 18% in memory<br>⚪ not tested | **3.05** · 256K<br>15 GiB RAM cache, 44% in memory<br>⚪ not tested | **3.05** · 256K<br>39 GiB RAM cache, all in memory<br>✅ *37.8 tok/s* · RTX 5090 capped to 16 GB | **3.05** · 256K<br>39 GiB RAM cache, all in memory<br>✅ *37.8 tok/s* · RTX 5090 capped to 16 GB, 64 GB RAM |
-| **24 GB** | **3.05** · 256K<br>4 GiB RAM cache, 34% in memory<br>⚪ not tested | **3.05** · 256K<br>15 GiB RAM cache, 60% in memory<br>⚪ not tested | **4.05** · 256K<br>45 GiB RAM cache, all in memory<br>✅ *42.6 tok/s* · RTX 5090 capped to 24 GB | **4.05** · 256K<br>47 GiB RAM cache, all in memory<br>✅ *42.6 tok/s* · RTX 5090 capped to 24 GB, 64 GB RAM |
-| **32 GB** | **3.05** · 256K<br>4 GiB RAM cache, 51% in memory<br>⚪ not tested | **3.05** · 256K<br>15 GiB RAM cache, 77% in memory<br>⚪ not tested | **4.05** · 256K<br>40 GiB RAM cache, all in memory<br>✅ *51.0 tok/s* · RTX 5090 | **4.05** · 256K<br>40 GiB RAM cache, all in memory<br>✅ *51.0 tok/s* · RTX 5090, 64 GB RAM |
+| **16 GB** | **3.05** · 256K<br>4 GiB RAM cache, 18% in memory<br>⚪ not tested | **3.05** · 256K<br>15 GiB RAM cache, 44% in memory<br>⚪ not tested | **3.05** · 256K<br>39 GiB RAM cache, all in memory<br>✅ *41.9 tok/s* · RTX 5090 capped to 16 GB | **3.05** · 256K<br>39 GiB RAM cache, all in memory<br>✅ *41.9 tok/s* · RTX 5090 capped to 16 GB, 64 GB RAM |
+| **24 GB** | **3.05** · 256K<br>4 GiB RAM cache, 34% in memory<br>⚪ not tested | **3.05** · 256K<br>15 GiB RAM cache, 60% in memory<br>⚪ not tested | **4.05** · 256K<br>45 GiB RAM cache, all in memory<br>✅ *51.4 tok/s* · RTX 5090 capped to 24 GB | **4.05** · 256K<br>47 GiB RAM cache, all in memory<br>✅ *51.4 tok/s* · RTX 5090 capped to 24 GB, 64 GB RAM |
+| **32 GB** | **3.05** · 256K<br>4 GiB RAM cache, 51% in memory<br>⚪ not tested | **3.05** · 256K<br>15 GiB RAM cache, 77% in memory<br>⚪ not tested | **4.05** · 256K<br>40 GiB RAM cache, all in memory<br>✅ *61.0 tok/s* · RTX 5090 | **4.05** · 256K<br>40 GiB RAM cache, all in memory<br>✅ *61.0 tok/s* · RTX 5090, 64 GB RAM |
 | **48 GB** | **3.05** · 256K<br>4 GiB RAM cache, 89% in memory<br>⚪ not tested | **3.05** · 256K<br>9 GiB RAM cache, all in memory<br>⚪ not tested | **4.05** · 256K<br>24 GiB RAM cache, all in memory<br>⚪ not tested | **4.05** · 256K<br>24 GiB RAM cache, all in memory<br>⚪ not tested |
 <!-- presets:end -->
 
@@ -105,25 +105,27 @@ The figures are for Linux; Windows keeps about 8 GB more RAM for itself.
 ### This fork: RTX 5090
 
 "Capped" rows hold the engine to a smaller card's VRAM. Real smaller cards also have less bandwidth, so expect less
-from them. These were measured on PyTorch 2.11 and CUDA 12.8; on 2.15 and 13.2, prefill is 47-72% faster at 8K-64K
-tokens and decode is the same ([report](research/torch-2.15/REPORT.md)).
+from them. Measured on PyTorch 2.15 and CUDA 13.2, the way the original's `benchmark.py` measures: short answers with
+thinking off for decode, and a document of up to 100K tokens for prefill. Below 8-32K tokens, prefill is slower than
+these figures: a staged prompt costs about 5.5 s whatever its size ([report](research/vram-scaling-torch-2.15/REPORT.md)).
 
 <!-- measured:begin -->
 | Card (VRAM) | Quant | Context | RAM cache | Prefill | Decode | Measured on |
 |---|---|---|---|---|---|---|
-| **32 GB** | 3.05 | 256K | 26 GiB | 6,407 tok/s | 60.8 tok/s | [RTX 5090](research/rtx5090-wsl/REPORT.md), 64 GB RAM, Windows (WSL2) |
-| **32 GB** | 3.05 | 256K | 25 GiB | 5,754 tok/s | 64.0 tok/s | [RTX 5090 capped to 32 GB](research/vram-scaling/REPORT.md), 64 GB RAM, Windows (WSL2) |
-| **24 GB** | 3.05 | 256K | 32 GiB | 5,896 tok/s | 51.5 tok/s | [RTX 5090 capped to 24 GB](research/vram-scaling/REPORT.md), 64 GB RAM, Windows (WSL2) |
-| **16 GB** | 3.05 | 256K | 38 GiB | 4,338 tok/s | 37.8 tok/s | [RTX 5090 capped to 16 GB](research/vram-scaling/REPORT.md), 64 GB RAM, Windows (WSL2) |
-| **12 GB** | 3.05 | 64K | 38 GiB | 1,816 tok/s | 33.2 tok/s | [RTX 5090 capped to 12 GB](research/vram-scaling/REPORT.md), 64 GB RAM, Windows (WSL2) |
-| **12 GB** | 3.05 | 128K, no staging | 38 GiB | 1,564 tok/s | 29.9 tok/s | [RTX 5090 capped to 12 GB](research/vram-scaling/REPORT.md), 64 GB RAM, Windows (WSL2) |
-| **8 GB, no display** | 3.05 | 16K, no staging | 38 GiB | 1,166 tok/s | 20.2 tok/s | [RTX 5090 capped to 8 GB](research/vram-scaling/REPORT.md), 64 GB RAM, Windows (WSL2) |
-| **32 GB** | 4.05 | 256K | 34 GiB | 5,732 tok/s | 56.3 tok/s | [RTX 5090](research/rtx5090-wsl/REPORT.md), 64 GB RAM, Windows (WSL2) |
-| **32 GB** | 4.05 | 256K | 40 GiB | 6,326 tok/s | 51.0 tok/s | [RTX 5090](research/rtx5090-wsl/REPORT.md), 64 GB RAM, Windows (WSL2) |
-| **32 GB** | 4.05 | 256K | 38 GiB | 5,293 tok/s | 56.1 tok/s | [RTX 5090 capped to 32 GB](research/vram-scaling/REPORT.md), 64 GB RAM, Windows (WSL2) |
-| **24 GB** | 4.05 | 256K | 38 GiB | 5,006 tok/s | 42.6 tok/s | [RTX 5090 capped to 24 GB](research/vram-scaling/REPORT.md), 64 GB RAM, Windows (WSL2) |
-| **16 GB** | 4.05 | 256K | 38 GiB | 1,384 tok/s | 30.3 tok/s | [RTX 5090 capped to 16 GB](research/vram-scaling/REPORT.md), 64 GB RAM, Windows (WSL2) |
-| **12 GB** | 4.05 | 32K, no staging | 38 GiB | 431 tok/s | 26.6 tok/s | [RTX 5090 capped to 12 GB](research/vram-scaling/REPORT.md), 64 GB RAM, Windows (WSL2) |
+| **32 GB** | 3.05 | 256K | 26 GiB | 4,668 tok/s | 72.1 tok/s | [RTX 5090](research/vram-scaling-torch-2.15/REPORT.md), 64 GB RAM, Windows (WSL2) |
+| **32 GB** | 3.05 | 256K | 38 GiB | 4,722 tok/s | 74.4 tok/s | [RTX 5090 capped to 32 GB](research/vram-scaling-torch-2.15/REPORT.md), 64 GB RAM, Windows (WSL2) |
+| **24 GB** | 3.05 | 256K | 38 GiB | 4,628 tok/s | 62.5 tok/s | [RTX 5090 capped to 24 GB](research/vram-scaling-torch-2.15/REPORT.md), 64 GB RAM, Windows (WSL2) |
+| **16 GB** | 3.05 | 256K | 38 GiB | 2,684 tok/s | 41.9 tok/s | [RTX 5090 capped to 16 GB](research/vram-scaling-torch-2.15/REPORT.md), 64 GB RAM, Windows (WSL2) |
+| **12 GB** | 3.05 | 64K | 38 GiB | 688 tok/s | 36.1 tok/s | [RTX 5090 capped to 12 GB](research/vram-scaling-torch-2.15/REPORT.md), 64 GB RAM, Windows (WSL2) |
+| **12 GB** | 3.05 | 128K, no staging | 38 GiB | 1,933 tok/s | 34.4 tok/s | [RTX 5090 capped to 12 GB](research/vram-scaling-torch-2.15/REPORT.md), 64 GB RAM, Windows (WSL2) |
+| **8 GB, no display** | 3.05 | 16K, no staging | 38 GiB | 1,490 tok/s | 26.4 tok/s | [RTX 5090 capped to 8 GB](research/vram-scaling-torch-2.15/REPORT.md), 64 GB RAM, Windows (WSL2) |
+| **8 GB, with display** | 3.05 | 16K, no staging | 38 GiB | 1,637 tok/s | 20.3 tok/s | [RTX 5090 capped to 8 GB](research/vram-scaling-torch-2.15/REPORT.md), 64 GB RAM, Windows (WSL2) |
+| **32 GB** | 4.05 | 256K | 34 GiB | 4,364 tok/s | 60.9 tok/s | [RTX 5090](research/vram-scaling-torch-2.15/REPORT.md), 64 GB RAM, Windows (WSL2) |
+| **32 GB** | 4.05 | 256K | 40 GiB | 4,233 tok/s | 61.0 tok/s | [RTX 5090](research/vram-scaling-torch-2.15/REPORT.md), 64 GB RAM, Windows (WSL2) |
+| **32 GB** | 4.05 | 256K | 38 GiB | 4,296 tok/s | 63.0 tok/s | [RTX 5090 capped to 32 GB](research/vram-scaling-torch-2.15/REPORT.md), 64 GB RAM, Windows (WSL2) |
+| **24 GB** | 4.05 | 256K | 38 GiB | 4,252 tok/s | 51.4 tok/s | [RTX 5090 capped to 24 GB](research/vram-scaling-torch-2.15/REPORT.md), 64 GB RAM, Windows (WSL2) |
+| **16 GB** | 4.05 | 256K | 38 GiB | 1,183 tok/s | 34.5 tok/s | [RTX 5090 capped to 16 GB](research/vram-scaling-torch-2.15/REPORT.md), 64 GB RAM, Windows (WSL2) |
+| **12 GB** | 4.05 | 32K, no staging | 38 GiB | 1,104 tok/s | 29.6 tok/s | [RTX 5090 capped to 12 GB](research/vram-scaling-torch-2.15/REPORT.md), 64 GB RAM, Windows (WSL2) |
 <!-- measured:end -->
 
 ### The original: measured by MaxDevv

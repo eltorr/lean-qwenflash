@@ -291,23 +291,25 @@ def measured_for(b):
 # cache the run had; capped: the engine was held to that card size on a bigger card (VRAM capacity only: a real card
 # of that size has less bandwidth). Add rows as real cards and other RAM sizes are measured (`qwenflash bench`,
 # then `qwenflash bench --sizing FOLDER` prints rows in this format).
-_R5090_FULL = {"ram": 64, "platform": "windows-wsl", "gpu": "RTX 5090", "source": "research/rtx5090-wsl"}
-_R5090 = {"ram": 64, "platform": "windows-wsl", "gpu": "RTX 5090", "capped": True, "source": "research/vram-scaling"}
+# prefill: the long document (the original's retrieval test, up to 100K tokens); decode: short answers, thinking off
+_R5090_FULL = {"ram": 64, "platform": "windows-wsl", "gpu": "RTX 5090", "source": "research/vram-scaling-torch-2.15"}
+_R5090 = dict(_R5090_FULL, capped=True)
 MEASURED = [
-    dict(_R5090_FULL, card=32, quant="3.05", context=262144, ram_cache_gib=26, decode=60.8, prefill=6407),
-    dict(_R5090_FULL, card=32, quant="4.05", context=262144, ram_cache_gib=34, decode=56.3, prefill=5732),
-    dict(_R5090_FULL, card=32, quant="4.05", context=262144, ram_cache_gib=40, decode=51.0, prefill=6326),
-    dict(_R5090, card=32, quant="3.05", context=262144, ram_cache_gib=25, decode=64.0, prefill=5754),
-    dict(_R5090, card=24, quant="3.05", context=262144, ram_cache_gib=32, decode=51.5, prefill=5896),
-    dict(_R5090, card=16, quant="3.05", context=262144, ram_cache_gib=38, decode=37.8, prefill=4338),
-    dict(_R5090, card=12, quant="3.05", context=65536, ram_cache_gib=38, decode=33.2, prefill=1816),
-    dict(_R5090, card=12, quant="3.05", context=131072, staging=False, ram_cache_gib=38, decode=29.9, prefill=1564),
-    dict(_R5090, card=8, display=False, quant="3.05", context=16384, staging=False, ram_cache_gib=38, decode=20.2,
-         prefill=1166),
-    dict(_R5090, card=32, quant="4.05", context=262144, ram_cache_gib=38, decode=56.1, prefill=5293),
-    dict(_R5090, card=24, quant="4.05", context=262144, ram_cache_gib=38, decode=42.6, prefill=5006),
-    dict(_R5090, card=16, quant="4.05", context=262144, ram_cache_gib=38, decode=30.3, prefill=1384),
-    dict(_R5090, card=12, quant="4.05", context=32768, staging=False, ram_cache_gib=38, decode=26.6, prefill=431),
+    dict(_R5090_FULL, card=32, quant="3.05", context=262144, ram_cache_gib=26, decode=72.1, prefill=4668),
+    dict(_R5090_FULL, card=32, quant="4.05", context=262144, ram_cache_gib=34, decode=60.9, prefill=4364),
+    dict(_R5090_FULL, card=32, quant="4.05", context=262144, ram_cache_gib=40, decode=61.0, prefill=4233),
+    dict(_R5090, card=32, quant="3.05", context=262144, ram_cache_gib=38, decode=74.4, prefill=4722),
+    dict(_R5090, card=24, quant="3.05", context=262144, ram_cache_gib=38, decode=62.5, prefill=4628),
+    dict(_R5090, card=16, quant="3.05", context=262144, ram_cache_gib=38, decode=41.9, prefill=2684),
+    dict(_R5090, card=12, quant="3.05", context=65536, ram_cache_gib=38, decode=36.1, prefill=688),
+    dict(_R5090, card=12, quant="3.05", context=131072, staging=False, ram_cache_gib=38, decode=34.4, prefill=1933),
+    dict(_R5090, card=8, display=False, quant="3.05", context=16384, staging=False, ram_cache_gib=38, decode=26.4,
+         prefill=1490),
+    dict(_R5090, card=8, quant="3.05", context=16384, staging=False, ram_cache_gib=38, decode=20.3, prefill=1637),
+    dict(_R5090, card=32, quant="4.05", context=262144, ram_cache_gib=38, decode=63.0, prefill=4296),
+    dict(_R5090, card=24, quant="4.05", context=262144, ram_cache_gib=38, decode=51.4, prefill=4252),
+    dict(_R5090, card=16, quant="4.05", context=262144, ram_cache_gib=38, decode=34.5, prefill=1183),
+    dict(_R5090, card=12, quant="4.05", context=32768, staging=False, ram_cache_gib=38, decode=29.6, prefill=1104),
 ]
 PRESET_CARDS = ((8, False), (8, True), (12, True), (16, True), (24, True), (32, True), (48, True))
 PRESET_RAM = (16, 32, 64, 128)

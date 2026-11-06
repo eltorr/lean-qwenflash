@@ -100,9 +100,9 @@ qwenflash bench                      this machine's settings on the whole card
 qwenflash bench quants               3.05 and 4.05 bpw
 qwenflash bench lean                 the lean profile
 qwenflash bench 4.05:22:262144       4.05 bpw held to 22 GB of VRAM (a 24 GB card), 256K context
-qwenflash bench matrix               8-32 GB cards emulated on a 32 GB one: the README's measured table (~2 h;
+qwenflash bench matrix               8-32 GB cards emulated on a 32 GB one: the README's measured table (~1 h;
                                      needs 64 GB of RAM: every run gets the same 38 GiB RAM cache)
-  --workload quick                   ~2 min a run instead of 5-10
+  --workload quick                   ~2 min a run instead of 3-6
   --out research/NAME/results        also write the results there
 qwenflash bench --resume             continue the last benchmark that was cut short
 qwenflash bench --list | --table FOLDER | --sizing FOLDER
