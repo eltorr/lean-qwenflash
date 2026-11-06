@@ -325,7 +325,9 @@ class RunSpecTests(unittest.TestCase):
         runs = bench.expand(["current", "quants", "lean"], self.cfg, lean_gb=16.0)
         self.assertEqual([r["label"] for r in runs],
                          ["4.05-card-256k", "3.05-card-256k", "4.05-card-256k", "4.05-16gb-256k-ram8"])
-        self.assertEqual(len(bench.expand("matrix", self.cfg)), len(bench.MATRIX))
+        matrix = bench.expand("matrix", self.cfg)
+        self.assertEqual(len(matrix), len(bench.MATRIX))
+        self.assertEqual({r["ram"] for r in matrix}, {38})                      # runs differ only in VRAM
 
     def test_bad_specs(self):
         for bad in ("5.0:card:65536", "3.05:2:65536", "3.05:card:999999999", "3.05:card:64k", "3.05:nan:65536",

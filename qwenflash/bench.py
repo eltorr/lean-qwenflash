@@ -7,7 +7,8 @@ Runs are QUANT:VRAM_GB|card:CONTEXT[:nostage][:ram=GIB], or a preset:
   current  the current settings on the whole card, as the full profile runs them
   lean     the current settings in the lean profile's VRAM and RAM
   quants   3.05 and 4.05 bpw at the current context, on the whole card
-  matrix   8-32 GB cards emulated on this one: the README's measured table (needs a 32 GB card)
+  matrix   8-32 GB cards emulated on this one: the README's measured table (needs a 32 GB card and 64 GB of RAM;
+           every run gets a 38 GiB RAM cache, so runs differ only in VRAM)
 VRAM_GB holds the engine to that much VRAM, as on a smaller card after the desktop's share: QWEN_VRAM_LIMIT_BYTES sizes
 the expert cache, and QWEN_VRAM_GUARD_BYTES stops the server past it, as running out of memory would on that card. A
 smaller card's bandwidth can't be emulated, so real smaller cards are slower. ":nostage" forces staging-free prefill
@@ -55,10 +56,14 @@ RUN_DIR = re.compile(r"^\d{8}-\d{6}(-\d+)?$")
 MAX_RUNS = 32
 PRESETS = {"current": "This machine's settings, whole card", "lean": "The lean profile",
            "quants": "3.05 and 4.05 bpw, whole card", "matrix": "8-32 GB cards emulated on this one"}
-# the README's measured table: card sizes after the desktop's share, each at the largest context that keeps staging
-MATRIX = ("3.05:30:262144", "3.05:22:262144", "3.05:14.5:262144", "3.05:10.5:65536", "3.05:10.5:131072:nostage",
-          "3.05:8:16384:nostage", "3.05:7:16384:nostage", "4.05:30:262144", "4.05:22:262144", "4.05:14.5:262144",
-          "4.05:10.5:32768:nostage")
+# the README's measured table: card sizes after the desktop's share, each at the largest context that keeps staging.
+# Every run gets the same RAM cache, as the earlier matrix (research/vram-scaling): sized from the RAM free when a run
+# starts, it varied with how much of the previous run's memory WSL had handed back yet (8-25 GiB a run).
+MATRIX_RAM = 38
+MATRIX = tuple(f"{s}:ram={MATRIX_RAM}" for s in (
+    "3.05:30:262144", "3.05:22:262144", "3.05:14.5:262144", "3.05:10.5:65536", "3.05:10.5:131072:nostage",
+    "3.05:8:16384:nostage", "3.05:7:16384:nostage", "4.05:30:262144", "4.05:22:262144", "4.05:14.5:262144",
+    "4.05:10.5:32768:nostage"))
 WORKLOADS = {
     "quick": {"trials": 1, "documents": (1024, 8192), "retrieval": False},
     "standard": {"trials": 3, "documents": (1024, 8192, 32768, 65536), "retrieval": True},

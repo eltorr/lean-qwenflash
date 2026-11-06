@@ -52,7 +52,9 @@ From two security reviews of the fork's code.
   - it measures the way the original's `benchmark.py` does, so results compare with MaxDevv's: thinking off, greedy
     decoding, his prompts and filler documents (1K-64K tokens), and his retrieval test. Answers end on their own after
     about 250 tokens, so a run takes 5-10 minutes and the matrix about 2 hours. A first try with thinking on and
-    open-ended prompts wrote 12,000-55,000 tokens an answer and would have taken over a day.
+    open-ended prompts wrote 12,000-55,000 tokens an answer and would have taken over a day;
+  - every matrix run gets the same 38 GiB RAM cache, as the earlier matrix. Sized from the RAM free when each run
+    started, it varied from 8 to 25 GiB with how much memory WSL had handed back from the run before.
 - **The PC comes first:** when a game or another app needs the GPU, or RAM nearly runs out, the run steps aside and
   starts again once the PC is free. A benchmark cut short by a cancel, a restart or a reboot resumes where it stopped
   (`qwenflash bench --resume`, or the tab's Resume button).
