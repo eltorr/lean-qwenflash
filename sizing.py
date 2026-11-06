@@ -289,8 +289,8 @@ def measured_for(b):
 
 # Measurements behind the presets. card: VRAM class in GiB; ram: the machine's RAM in GiB; ram_cache_gib: the RAM
 # cache the run had; capped: the engine was held to that card size on a bigger card (VRAM capacity only: a real card
-# of that size has less bandwidth). Add rows as real cards and other RAM sizes are measured (bench/vram_matrix.py,
-# then `bench/vram_table.py --sizing` prints rows in this format).
+# of that size has less bandwidth). Add rows as real cards and other RAM sizes are measured (`qwenflash bench`,
+# then `qwenflash bench --sizing FOLDER` prints rows in this format).
 _R5090_FULL = {"ram": 64, "platform": "windows-wsl", "gpu": "RTX 5090", "source": "research/rtx5090-wsl"}
 _R5090 = {"ram": 64, "platform": "windows-wsl", "gpu": "RTX 5090", "capped": True, "source": "research/vram-scaling"}
 MEASURED = [

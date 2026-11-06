@@ -8,7 +8,7 @@ include = [
     "tests/test_sizing.py",
     "tests/test_openai_compat.py",
     "tests/test_openai_responses.py",
-    "bench/*.py",
+    "tests/test_bench.py",
     "sizing.py",
     "download_http.py",
     "bin/qwenflash-timestamp",

@@ -98,8 +98,8 @@ for chunk in client.chat.completions.create(
 ## Control API (the dashboard's, not OpenAI)
 
 Under `/_switcher/api/` on any port, with the dashboard token: a Bearer header, or the private link's cookie. The
-token is `dashboard_token` in `config.json`. On the network port, `setup/run`, `quit`, `quit_keep_model`,
-autostart, `new_remote_link` and `remote_host` are refused: they're only for the PC itself.
+token is `dashboard_token` in `config.json`. On the network port, `setup/run`, starting or cancelling a benchmark,
+`quit`, `quit_keep_model`, autostart, `new_remote_link` and `remote_host` are refused: they're only for the PC itself.
 
 | Method | Path | What |
 |---|---|---|
@@ -109,6 +109,7 @@ autostart, `new_remote_link` and `remote_host` are refused: they're only for the
 | POST | `action` | `{"action": "start_full"}`. Also `start_lean`, `pause`, `restart`, `auto_on`/`auto_off`, `wake_on`/`wake_off`, `new_remote_link`, `quit`, `quit_keep_model` |
 | GET | `log` | Tails of the model's and the manager's logs |
 | GET / POST | `setup`, `setup/run` | Setup status; `{"step": "build"}` runs one step |
+| GET / POST | `bench`, `bench/cancel` | Benchmark output and results (`?since=N`; `?run=NAME` for an earlier one); POST `{"runs": ["quants"], "workload": "quick"}` starts one |
 
 **What's refused:**
 

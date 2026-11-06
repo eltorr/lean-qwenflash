@@ -41,6 +41,18 @@ From two security reviews of the fork's code.
 - **GitHub:** runs the same scan on every push, plus CodeQL; Dependabot proposes updates.
 - **`tools/pre-push`:** runs the scan before each push.
 
+### Benchmarks
+
+- **One tool,** from the dashboard's new Benchmark tab or `qwenflash bench`. It replaces `bench/vram_matrix.py` and
+  `bench/vram_table.py`:
+  - it runs any configuration, or a preset: this machine's settings, the lean profile, both quants, or 8-32 GB cards
+    emulated on a 32 GB one;
+  - the manager frees the GPU for it and puts the model back afterwards;
+  - each result records the machine and its stack, and the change since the last run of the same configuration;
+  - prompt reading follows the engine's `sweep.py` protocol (fresh random tokens at 8K-64K).
+- **Output is never capped:** the old runner cut answers at 400-1,500 tokens.
+- **Run records:** [research/README.md](research/README.md) lists every benchmark with its date, machine and stack.
+
 ### Engine
 
 - **PyTorch 2.15.0 on CUDA 13.2,** up from 2.11 on CUDA 12.8 ([report](research/torch-2.15/REPORT.md)):

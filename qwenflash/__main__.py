@@ -6,6 +6,7 @@
   python -m qwenflash detect                                   hardware, platform and recommendations
   python -m qwenflash setup [STEP]                             list setup steps, or run one in this terminal
   python -m qwenflash plan [--budget-gb N]                     VRAM/RAM plan for this GPU (sizing.py)
+  python -m qwenflash bench [RUNS] [--workload quick]          benchmark this machine (takes the GPU while it runs)
 """
 import argparse
 import asyncio
@@ -14,6 +15,8 @@ import os
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from . import config
@@ -230,6 +233,114 @@ def cmd_plan(cfg, a):
     return 0
 
 
+def post_json(url, body, headers, timeout=30):
+    req = urllib.request.Request(url, json.dumps(body).encode(), {"Content-Type": "application/json", **headers})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        try:
+            return json.loads(e.read())
+        except ValueError:
+            return {"ok": False, "message": f"HTTP {e.code}"}
+
+
+def cmd_bench(cfg, a):
+    """Benchmark through the running service (as the dashboard does), or in this terminal when it isn't running."""
+    from . import bench
+    if a.table or a.sizing:
+        folder = Path(a.table or a.sizing)
+        records = bench.load_records(folder)
+        if not records:
+            print(f"no results in {folder}")
+            return 1
+        if a.sizing:
+            print(bench.measured_rows(records, folder.as_posix().rstrip("/").removesuffix("/results")))
+            return 0
+        print(bench.table(records))
+        p = bench.prefill_table(records)
+        if p:
+            print("\nPrompt reading (fresh random tokens):\n\n" + p)
+        return 0
+    if a.list:
+        for h in bench.history(50):
+            print(f"  {h['name']}  {h['runs']:>2} run(s)  {bench.BENCH_DIR / h['name']}")
+        return 0
+    runs = a.runs or ["current"]
+    base = service_url(cfg) + "api/"
+    try:
+        http_get_json(base + "status", 3, auth(cfg))
+    except Exception:  # noqa: BLE001 - not running: benchmark here
+        return bench_here(cfg, a, runs)
+    r = post_json(base + "bench", {"runs": runs, "workload": a.workload}, auth(cfg))
+    print(r.get("message"))
+    if not r.get("ok"):
+        return 2
+    seq, cancelled = 0, False
+    while True:
+        try:
+            r = http_get_json(base + f"bench?since={seq}", 10, auth(cfg))
+            for _, line in r["lines"]:
+                print(line, flush=True)
+            seq = r["seq"]
+            if not r["running"]:
+                break
+            time.sleep(2)
+        except KeyboardInterrupt:
+            if cancelled:
+                raise
+            cancelled = True
+            print("cancelling the benchmark (Ctrl+C again stops watching)")
+            post_json(base + "bench/cancel", {}, auth(cfg))
+    return bench_results(r["records"], a)
+
+
+def bench_here(cfg, a, runs):
+    """No service: run the benchmark in this process. A model server left running is stopped, and stays stopped."""
+    from .service import Service
+    print("The QwenFlash service isn't running, so the benchmark runs in this terminal.")
+    svc = Service(cfg)
+    svc.mon.start()
+    svc.host.start_follower()
+    svc.bench.echo = lambda line: print(line, flush=True)
+
+    async def go():
+        svc.tlock = asyncio.Lock()
+        for _ in range(40):                       # the first GPU reading
+            if svc.mon.get():
+                break
+            await asyncio.sleep(0.25)
+        ok, msg = svc.bench.start(runs, a.workload)
+        if not ok:
+            print(msg)
+            return None
+        await svc.bench.task
+        return svc.bench.records
+    try:
+        records = asyncio.run(go())
+    except KeyboardInterrupt:
+        svc.host.backend_stop()
+        print("stopped")
+        return 1
+    return 2 if records is None else bench_results(records, a)
+
+
+def bench_results(records, a):
+    from . import bench
+    if a.out and records:
+        out = Path(a.out)
+        out.mkdir(parents=True, exist_ok=True)
+        for r in records:
+            (out / f"{r['label']}.json").write_text(json.dumps(r, indent=1))
+        print(f"wrote {len(records)} result(s) to {out}")
+    if records:
+        print("\n" + bench.table(records))
+        p = bench.prefill_table(records)
+        if p:
+            print("\nPrompt reading (fresh random tokens):\n\n" + p)
+    return 0 if records and not any(r.get("error") for r in records) else 1
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="qwenflash", description="QwenFlash manager")
     sub = ap.add_subparsers(dest="cmd")
@@ -248,6 +359,15 @@ def main(argv=None):
     pl = sub.add_parser("plan", help="VRAM/RAM plan for this GPU")
     pl.add_argument("--budget-gb", type=float)
     pl.add_argument("--context", type=int)
+    b = sub.add_parser("bench", help="benchmark this machine (takes the GPU; the model comes back afterwards)")
+    b.add_argument("runs", nargs="*", help="presets: current (default), lean, quants, matrix; or "
+                                           "QUANT:VRAM_GB|card:CONTEXT[:nostage][:ram=GIB]")
+    b.add_argument("--workload", choices=("quick", "standard"), default="standard",
+                   help="quick: ~5 min a run; standard: ~15 min a run (default)")
+    b.add_argument("--out", help="also write each run's JSON into this folder, e.g. research/NAME/results")
+    b.add_argument("--table", metavar="FOLDER", help="print the report tables of a results folder")
+    b.add_argument("--sizing", metavar="FOLDER", help="print sizing.MEASURED rows for a results folder")
+    b.add_argument("--list", action="store_true", help="list earlier results")
     a = ap.parse_args(argv)
     cfg = config.load_config()
     if not config.CONFIG_PATH.exists():
@@ -255,7 +375,7 @@ def main(argv=None):
         config.save_config(cfg)
     config.ensure_token(cfg)
     handler = {None: cmd_serve, "serve": cmd_serve, "open": cmd_open, "status": cmd_status, "detect": cmd_detect,
-               "setup": cmd_setup, "plan": cmd_plan}[a.cmd]
+               "setup": cmd_setup, "plan": cmd_plan, "bench": cmd_bench}[a.cmd]
     return handler(cfg, a)
 
 

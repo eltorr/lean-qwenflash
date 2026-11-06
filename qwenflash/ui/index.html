@@ -133,6 +133,11 @@
     border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
   .step .st { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); }
   .step .title { font-weight: 600; } .step .desc { color: var(--text-muted); font-size: 12px; }
+  .benchbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; }
+  .benchbar select { font: inherit; background: var(--surface-2); color: var(--text-primary); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 8px; max-width: 100%; }
+  .benchtable td.err { text-align: left; color: var(--critical); }
+  .delta { color: var(--text-muted); font-size: 11px; }
   .banner { display: none; background: var(--critical); color: #fff; padding: 8px 12px; border-radius: 8px; margin-bottom: 14px; }
   .muted { color: var(--text-muted); }
   .badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary);
@@ -247,6 +252,7 @@
     <button class="on" data-tab="activity">Activity</button>
     <button data-tab="settings">Settings</button>
     <button data-tab="setup">Setup</button>
+    <button data-tab="bench">Benchmark</button>
     <button data-tab="logs">Logs</button>
   </nav>
   <section class="panel on" id="p-activity"><ul class="events" id="events"></ul></section>
@@ -269,6 +275,24 @@
     <h3>Setup steps <span class="muted" id="platformNote"></span></h3>
     <div class="steps" id="steps"></div>
     <pre class="console" id="setupOut">Output of setup steps appears here.</pre>
+  </section>
+  <section class="panel" id="p-bench">
+    <p class="muted" style="margin-top:0">Measures this machine: starts the model in each configuration, generates answers to their
+      natural end, and times prompt reading at fixed sizes. It takes the GPU: the model stops for the run, requests get an
+      error meanwhile, and the model comes back afterwards. <code>qwenflash bench</code> does the same from a terminal.</p>
+    <div class="benchbar local-only">
+      <select id="benchRuns" aria-label="What to measure"></select>
+      <select id="benchWorkload" aria-label="Workload">
+        <option value="quick">Quick · about 5 min a run</option>
+        <option value="standard">Standard · about 15 min a run</option>
+      </select>
+      <button class="primary" id="benchStart">Start benchmark</button>
+      <button id="benchCancel" style="display:none">Cancel</button>
+      <span class="muted" id="benchMsg"></span>
+    </div>
+    <div class="benchbar"><span class="muted" id="benchWhich"></span><select id="benchHistory" aria-label="Earlier results"></select></div>
+    <div style="overflow-x:auto"><table class="benchtable" id="benchTable"></table></div>
+    <pre class="console" id="benchOut">Benchmark output appears here.</pre>
   </section>
   <section class="panel" id="p-logs">
     <h2 style="font-size:13px;color:var(--text-secondary)">Model server</h2><pre class="console" id="logBackend"></pre>
@@ -318,7 +342,7 @@ const STATES = {
 const PRESSURE = { none: ["good", "✓", "No pressure"], moderate: ["warning", "▲", "Moderate pressure"],
                    severe: ["critical", "■", "Heavy pressure"] };
 const PAUSE_WHY = { pressure: "paused because other apps needed resources", manual: "paused from the dashboard",
-                    idle: "paused after being idle" };
+                    idle: "paused after being idle", benchmark: "stopped for a benchmark" };
 
 function renderStatus() {
   $("banner").style.display = "none";
@@ -349,6 +373,7 @@ function renderStatus() {
   if (S.state === "running") meta += ` · ${sub}${S.budget_gb ? ` · <b>${S.budget_gb} GB</b> VRAM budget` : ""}${S.ram_cache_gib != null ? ` · ${S.ram_cache_gib} GiB RAM cache` : ""} · up ${dur(S.now - S.since)}${S.adopted ? " · kept across a manager restart" : S.startup_s ? ` · started in ${dur(S.startup_s)}` : ""}`;
   else if (S.state === "starting") meta += ` · starting ${S.tier} for ${dur(S.now - S.since)} (usually ~1 min)`;
   else if (S.state === "stopped") meta += ` · ${PAUSE_WHY[S.paused_reason] || "not loaded"}${S.idle_s != null ? "" : ""}`;
+  if (S.bench_running) meta += ` · <a href="#" onclick="showTab('bench');return false">benchmark running${S.bench_current ? ": " + esc(S.bench_current) : ""}</a>`;
   const P = S.plans || {};
   if (P.full && P.lean) {
     meta += `<br><span class="muted">Fits now: full ${P.full.ok ? P.full.budget_gb + " GB" : "no"} · lean ${P.lean.ok ? P.lean.budget_gb + " GB" : "no"}` +
@@ -629,6 +654,55 @@ async function loadHardware(refresh) {
     alertMsg(res.message); await loadConfig(); loadHardware(true);
   });
 }
+// ---- benchmark
+let benchSeq = 0, benchShown = null;
+const PRESET_ORDER = ["current", "lean", "quants", "matrix"];
+function benchCell(v, unit = " tok/s", digits = 0) { return v == null ? "-" : Number(v).toLocaleString(undefined, { maximumFractionDigits: digits }) + unit; }
+function benchDelta(p) { return p == null ? "" : ` <span class="delta">${p > 0 ? "+" : ""}${p}%</span>`; }
+function runName(n) { return n.replace(/^(\d{4})(\d\d)(\d\d)-(\d\d)(\d\d).*/, "$1-$2-$3 $4:$5"); }
+function renderBench(r) {
+  const sel = $("benchRuns");
+  if (!sel.options.length) sel.innerHTML = PRESET_ORDER.filter((k) => r.presets[k]).map((k) => `<option value="${k}">${esc(r.presets[k])}${k === "matrix" ? " · hours" : ""}</option>`).join("");
+  $("benchStart").disabled = r.running || !!(S && S.setup_running);
+  $("benchCancel").style.display = r.running ? "" : "none";
+  const hs = $("benchHistory"), names = (r.history || []).map((h) => h.name);
+  if (hs.dataset.names !== names.join()) {
+    hs.dataset.names = names.join();
+    hs.innerHTML = (r.history || []).map((h) => `<option value="${esc(h.name)}">${esc(runName(h.name))} · ${h.runs} run${h.runs === 1 ? "" : "s"}</option>`).join("");
+  }
+  hs.style.display = names.length > 1 && !r.running ? "" : "none";
+  if (!benchShown && r.dir) hs.value = r.dir;
+  $("benchWhich").textContent = r.running ? `Running ${r.current || "…"} (${r.runs.indexOf(r.current) + 1} of ${r.runs.length}, ${r.workload} workload)`
+    : (r.results.length ? `Results${r.dir ? " of " + runName(benchShown || r.dir) : ""}:` : "No results yet.");
+  const sizes = [...new Set(r.results.flatMap((x) => Object.keys(x.prefill || {})))].sort((a, b) => a - b);
+  const head = `<tr><th>Run</th><th>Answers (median)</th><th>Long document</th>${sizes.map((n) => `<th>Read ${n / 1024}K</th>`).join("")}` +
+    `<th>First token</th><th>Startup</th><th>VRAM</th><th>RAM cache</th><th>Experts from VRAM / RAM / NVMe</th></tr>`;
+  $("benchTable").innerHTML = r.results.length ? head + r.results.map((x) => {
+    if (x.error) return `<tr><td>${esc(x.label)}</td><td class="err" colspan="${8 + sizes.length}">${esc(x.error)}</td></tr>`;
+    const pv = x.previous || {}, pp = pv.prefill_pct || {};
+    const doc = x.document ? `${benchCell(x.document.tps)}${x.document.found ? "" : " · fact missed"}${benchDelta(pv.document_pct)}` : "-";
+    const tip = (x.stack ? `PyTorch ${x.stack.torch} · CUDA ${x.stack.cuda} · driver ${x.stack.driver} · commit ${x.stack.commit}` : "") +
+      (pv.date ? ` · % compared with ${pv.date}` : "");
+    return `<tr title="${esc(tip)}"><td>${esc(x.label)}</td><td>${benchCell(x.decode, " tok/s", 1)}${benchDelta(pv.decode_pct)}</td><td>${doc}</td>` +
+      sizes.map((n) => `<td>${benchCell((x.prefill || {})[n])}${benchDelta(pp[n])}</td>`).join("") +
+      `<td>${x.ttft == null ? "-" : x.ttft.toFixed(2) + " s"}</td><td>${x.startup_s == null ? "-" : Math.round(x.startup_s) + " s"}</td>` +
+      `<td>${x.model_vram_gb == null ? "-" : x.model_vram_gb.toFixed(1) + " GB"}</td><td>${x.ram_gib == null ? "-" : x.ram_gib + " GiB"}</td>` +
+      `<td>${esc(x.picks || "-")}</td></tr>`;
+  }).join("") : "";
+}
+async function pollBench() {
+  const r = await api(`bench?since=${benchSeq}${benchShown ? "&run=" + encodeURIComponent(benchShown) : ""}`);
+  if (!r || !r.presets) return false;
+  renderBench(r);
+  if (r.lines.length) {
+    const o = $("benchOut");
+    if (benchSeq === 0) o.textContent = "";
+    o.textContent += r.lines.map((l) => l[1]).join("\n") + "\n";
+    o.scrollTop = o.scrollHeight;
+  }
+  benchSeq = r.seq;
+  return r.running;
+}
 function alertMsg(m) { $("saveMsg").textContent = m || ""; }
 function showTab(name) { document.querySelector(`.tabs button[data-tab="${name}"]`).click(); }
 
@@ -641,13 +715,22 @@ $("saveBtn").onclick = saveSettings;
 $("checkBtn").onclick = () => { $("setupDetail").textContent = "checking…"; loadHardware(true).then(pollSetup); };
 $("quitBtn").onclick = async () => { if (confirm("Stop the model and quit the QwenFlash service?")) await api("action", { action: "quit" }); };
 $("quitKeepBtn").onclick = async () => { if (confirm("Quit the QwenFlash service but leave the model running? Clients can't reach it until the service starts again.")) await api("action", { action: "quit_keep_model" }); };
+$("benchStart").onclick = async () => {
+  const wl = $("benchWorkload").value;
+  if (!confirm(`Start the benchmark (${$("benchRuns").selectedOptions[0].text}, ${wl} workload)? The model stops while it runs, and clients get an error until it's done.`)) return;
+  benchShown = null; benchSeq = 0;
+  const r = await api("bench", { runs: [$("benchRuns").value], workload: wl });
+  $("benchMsg").textContent = r.message || ""; pollBench();
+};
+$("benchCancel").onclick = async () => { const r = await api("bench/cancel", {}); $("benchMsg").textContent = r.message || ""; };
+$("benchHistory").onchange = (e) => { benchShown = e.target.value; pollBench(); };
 $("forgetBtn").onclick = async () => { const r = await api("action", { action: "forget_learned" }); alertMsg(r.ok ? "forgot learned limits" : r.message); };
 $("copyBtn").onclick = () => copyText($("endpoint").textContent, $("copyBtn"));
 document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => {
   tab = b.dataset.tab;
   document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
   document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("on", p.id === "p-" + tab));
-  if (tab === "setup") { pollSetup(); loadHardware(false); } if (tab === "logs") pollLogs();
+  if (tab === "setup") { pollSetup(); loadHardware(false); } if (tab === "logs") pollLogs(); if (tab === "bench") pollBench();
 });
 async function pollLogs() {
   const r = await api("log");
@@ -667,6 +750,7 @@ async function poll() {
   window.addEventListener("resize", () => { if (S && S.history) renderChart(); });
   setInterval(async () => { if (tab === "setup" || (S && S.setup_running)) { try { await pollSetup(); } catch {} } }, 1000);
   setInterval(() => { if (tab === "logs") pollLogs().catch(() => {}); }, 3000);
+  setInterval(() => { if (tab === "bench") pollBench().catch(() => {}); }, 2000);
 })();
 </script>
 </body>

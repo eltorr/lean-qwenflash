@@ -23,6 +23,7 @@ Clone it and make it your own. Just keep the credit to MaxDevv, whose engine it'
 | **Quants** | 3.05 bpw | 3.05 and 4.05 bpw |
 | **API** | OpenAI Chat Completions | Adds the OpenAI Responses API ([what's new](FORK.md#api-whats-original-and-whats-new)) |
 | **Monitoring** | Terminal output | A local web dashboard |
+| **Benchmarks** | `benchmark.py`, started by hand | A Benchmark tab and `qwenflash bench`: any configuration, with the stack recorded and compared with the last run ([records](research/README.md)) |
 | **Engine** | | A few fixes: pinned memory under WSL2, 4.05 bpw prefill, configurable VRAM limits, kernels built for the local GPU, OpenAI `reasoning_effort` values |
 | **Stack** | PyTorch 2.11, CUDA 12.8 | PyTorch 2.15, CUDA 13.2: prefill 47-72% faster, decode the same ([report](research/torch-2.15/REPORT.md)) |
 | **Security** | Listens on localhost | A sign-in token for the dashboard, other websites refused, a model server only the manager can call, packages pinned by hash, verified downloads |

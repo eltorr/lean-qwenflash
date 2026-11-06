@@ -2,7 +2,8 @@
 
 Measured 2026-11-04 on one RTX 5090 (32 GB, PCIe 5.0 x16) under WSL2, with the engine capped to smaller cards.
 Ryzen 9 9950X, 64 GB DDR5 (56 GB for WSL), Samsung 990 PRO. Results: [results/](results/). Runner:
-[`bench/vram_matrix.py`](../../bench/vram_matrix.py); table: `python bench/vram_table.py research/vram-scaling/results`.
+`bench/vram_matrix.py`, which became [`qwenflash bench`](../../qwenflash/bench.py) on 2026-11-05; table:
+`qwenflash bench --table research/vram-scaling/results`.
 
 ## Method
 
@@ -86,7 +87,7 @@ Every completed run found the needle.
 
 ## A dead end worth knowing: emulating with a ballast under WSL2
 
-The first attempt held the rest of the card in a separate process ([`bench/vram_ballast.py`](../../bench/vram_ballast.py))
+The first attempt held the rest of the card in a separate process ([`vram_ballast.py`](vram_ballast.py))
 instead of capping the engine. Under Windows/WSL2, the driver (WDDM) **over-commits VRAM**: it pages idle allocations
 out to system RAM. The engine got the ballast's memory back: 18 GB of expert cache on an emulated 10.5 GB card. Where
 the model's own memory got paged, decode fell to 32-47 tok/s. Those runs are kept in [attempt1-ballast/](attempt1-ballast/)
@@ -99,8 +100,8 @@ That is why the manager watches other apps' VRAM and steps the model down instea
 
 - **RAM, for the presets:** every row here had a 25-38 GiB RAM cache (a 64 GB machine). The README presets for 16-32 GB
   of RAM (4-15 GiB caches) and for 128 GB with a 24 GB card or smaller are computed, not measured.
-  `bench/vram_matrix.py` takes `:ram=GIB` per run (e.g. `4.05:22:262144:ram=48`, `3.05:14.5:262144:ram=4`) and
-  `card` instead of a VRAM figure to run a real card uncapped; `bench/vram_table.py --sizing` prints the rows for
+  `qwenflash bench` takes `:ram=GIB` per run (e.g. `4.05:22:262144:ram=48`, `3.05:14.5:262144:ram=4`) and
+  `card` instead of a VRAM figure to run a real card uncapped; `qwenflash bench --sizing` prints the rows for
   `sizing.MEASURED`.
 - **Real 12, 16 and 24 GB cards:** what PCIe 4.0 and lower bandwidth cost, compared with these capped numbers.
 - **8 GB with a display:** after shrinking the fixed footprint, profile the ~2.5 GB of VRAM no component accounts for

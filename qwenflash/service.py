@@ -32,6 +32,7 @@ from .config import GB, GIB, LOG_DIR, REPO, SERVED_NAME, SERVICE_KEYS, log
 from .host import make_host
 from .httpio import (BACKEND_KEY_HEADER, HTTPError, StreamStats, backend_request, close, http_ok, oai_error, pipe,
                      read_body, read_head, respond)
+from .bench import Bench
 from .setup import Setup
 
 sys.path.insert(0, str(REPO))
@@ -99,6 +100,7 @@ class Service:
         self.mon = Monitor(self)
         self.be = Backend()
         self.setup = Setup(self)
+        self.bench = Bench(self)
         self.tlock = None
         self.task = None
         self.in_flight = self.held = self.served = self.failed = 0
@@ -206,8 +208,8 @@ class Service:
     def ram_need_lean(self):
         return self.cfg["lean_ram_gb"] * GIB + self.ram_overhead()
 
-    def ram_overhead(self):
-        learned = self.learned.get("_ram_overhead", {}).get(f"{self.host.kind}|{self.cfg['quant']}")
+    def ram_overhead(self, quant=None):
+        learned = self.learned.get("_ram_overhead", {}).get(f"{self.host.kind}|{quant or self.cfg['quant']}")
         return learned if learned else RAM_OVERHEAD.get(self.host.kind, 8 * GB)
 
     def measure_ram_overhead(self, m):
@@ -552,6 +554,8 @@ class Service:
         tried = False
         while True:
             st = self.be.state
+            if self.bench.running:
+                return False, "a benchmark is running (QwenFlash dashboard, Benchmark tab); try again when it finishes"
             if st == "running":
                 return True, ""
             if st == "error" and tried:
@@ -827,6 +831,7 @@ class Service:
             "remote": {"port": cfg["network_port"] if self.front_server else 0,
                        "host": cfg["remote_host"] or socket.gethostname().lower()},
             "setup_running": self.setup.running,
+            "bench_running": self.bench.running, "bench_current": self.bench.current,
         }
 
     async def api(self, method, path, target, body, writer, local):
@@ -849,7 +854,9 @@ class Service:
             await respond(writer, 400, {"error": "bad json"})
             return
         route = path[len("/_switcher/api/"):] if path.startswith("/_switcher/api/") else None
-        if not local and ((route == "action" and data.get("action") in LOCAL_ONLY_ACTIONS) or route == "setup/run"):
+        local_only = (route in ("setup/run", "bench/cancel") or (route == "bench" and method == "POST")
+                      or (route == "action" and data.get("action") in LOCAL_ONLY_ACTIONS))
+        if not local and local_only:
             await respond(writer, 403, {"ok": False, "message": "only on the PC itself"})
         elif route == "status":
             await respond(writer, 200, self.status())
@@ -882,7 +889,27 @@ class Service:
             if self.observe:
                 await respond(writer, 409, {"ok": False, "message": "observe mode"})
                 return
+            if self.bench.running:
+                await respond(writer, 409, {"ok": False, "message": "a benchmark is running"})
+                return
             ok, msg = await self.setup.run(str(data.get("step", "")))
+            await respond(writer, 200 if ok else 409, {"ok": ok, "message": msg})
+        elif route == "bench" and method == "GET":
+            q = urllib.parse.parse_qs(urllib.parse.urlsplit(target).query)
+            since = int(q["since"][0]) if q.get("since", [""])[0].isdigit() else 0
+            await respond(writer, 200, self.bench.report(since, (q.get("run") or [None])[0]))
+        elif route == "bench" and method == "POST":
+            runs = data.get("runs", ["current"])
+            if isinstance(runs, str):
+                runs = [runs]
+            if not isinstance(runs, list) or len(runs) > 64 or not all(isinstance(x, str) and len(x) <= 64
+                                                                       for x in runs):
+                await respond(writer, 400, {"ok": False, "message": "runs: a list of presets or run specs"})
+                return
+            ok, msg = self.bench.start(runs, str(data.get("workload", "standard")))
+            await respond(writer, 200 if ok else 409, {"ok": ok, "message": msg})
+        elif route == "bench/cancel" and method == "POST":
+            ok, msg = await self.bench.cancel()
             await respond(writer, 200 if ok else 409, {"ok": ok, "message": msg})
         else:
             await respond(writer, 404, {"error": "not found"})
@@ -930,6 +957,8 @@ class Service:
         lifecycle = {"start_full", "start_lean", "pause", "restart"}
         if self.observe and a in lifecycle:
             return 409, {"ok": False, "message": "observe mode: this manager does not control the model"}
+        if self.bench.running and a in lifecycle:
+            return 409, {"ok": False, "message": "a benchmark is running; cancel it in the Benchmark tab first"}
         msg = None
         if a in ("start_full", "start_lean"):
             # a lean start chosen by hand stays lean until you choose otherwise (no automatic re-saturation)
@@ -1011,7 +1040,8 @@ class Service:
             self._last_hist_t = m["t"]
             self.hist.append([round(m["t"], 1), round(ext / GB, 2), round(max(0.0, m["vram_used"] - ext) / GB, 2),
                               round((m["ram_total"] - m["ram_avail"]) / GB, 2), round(m["gpu_util"])])
-        if self.observe or not cfg["auto_switch"] or self.setup.blocking or (self.task and not self.task.done()):
+        if (self.observe or not cfg["auto_switch"] or self.setup.blocking or self.bench.running
+                or (self.task and not self.task.done())):
             return
         st, tier = self.be.state, self.be.tier
         idle = self.in_flight == 0 and (self.last_done is None or now - self.last_done >= 10)

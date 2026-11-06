@@ -20,7 +20,6 @@
 !/setup/
 !/docs/
 !/qwenflash/
-!/bench/
 !/QwenFlash.cmd
 !/qwenflash.sh
 !/FORK.md
@@ -37,6 +36,7 @@
 !/research/rtx5090-wsl/
 !/research/vram-scaling/
 !/research/torch-2.15/
+!/research/README.md
 /research/4090-final/*
 !/research/4090-final/REPORT.md
 !/research/4090-final/results/

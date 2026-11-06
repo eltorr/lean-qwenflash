@@ -30,6 +30,7 @@ qwenflash setup           the setup steps and their status
 qwenflash setup STEP      run one step: wsl, wslconfig, distro, driver, base, engine, build, m305, m405
 qwenflash plan            this machine's preset, and what fits at each quant
 qwenflash status          what the service is doing (--json for everything)
+qwenflash bench           benchmark this machine (see Benchmarks)
 ```
 
 On Windows, run these as `.venv\Scripts\python -m qwenflash ...`; on Linux, as `./qwenflash.sh ...`.
@@ -88,11 +89,42 @@ staging fits.
   - RAM: the RAM cache shrinks by 4 GiB.
   - *Settings > Forget learned limits* clears these.
 
+## Benchmarks
+
+The **Benchmark** tab and `qwenflash bench` measure this machine: they start the model in each configuration, time
+answers and prompt reading, and record the results. The model stops for the run, requests get an error meanwhile,
+and the model comes back afterwards. Only the PC itself can start one.
+
+```
+qwenflash bench                      this machine's settings on the whole card
+qwenflash bench quants               3.05 and 4.05 bpw
+qwenflash bench lean                 the lean profile
+qwenflash bench 4.05:22:262144       4.05 bpw held to 22 GB of VRAM (a 24 GB card), 256K context
+qwenflash bench matrix               8-32 GB cards emulated on a 32 GB one: the README's measured table (hours)
+  --workload quick                   ~5 min a run instead of ~15
+  --out research/NAME/results        also write the results there
+qwenflash bench --list | --table FOLDER | --sizing FOLDER
+```
+
+- **What a run measures:**
+  - five answers, each to its natural end (the output is never capped);
+  - a long document with one fact to find;
+  - prompt reading at 8K, 16K, 32K and 64K tokens, from fresh random tokens so nothing is cached;
+  - startup time, VRAM, and where the experts came from (VRAM, RAM or NVMe).
+- **A run spec** is `QUANT:VRAM_GB|card:CONTEXT[:nostage][:ram=GIB]`. A VRAM figure holds the engine to that much, as on
+  a smaller card. It can't emulate a smaller card's bandwidth, so real smaller cards are slower.
+- **Results:** one JSON file per run in `bench/` in the settings folder, with the machine and its stack (GPU, driver,
+  CUDA, PyTorch, commit). Each run shows the change since the last run of the same configuration, which makes a quick
+  before-and-after check of a change.
+- Without the service running, `qwenflash bench` runs in the terminal, and leaves the model stopped.
+
+The measured runs behind the README are listed in [research/](../research/README.md).
+
 ## Where things are
 
 | Path | What |
 |---|---|
-| `qwenflash/` | the manager: `service.py`, `host.py` (Windows + WSL2 or Linux), `hardware.py`, `setup.py`, `ui/` |
+| `qwenflash/` | the manager: `service.py`, `host.py` (Windows + WSL2 or Linux), `hardware.py`, `setup.py`, `bench.py`, `ui/` |
 | `sizing.py` | the VRAM and RAM model, shared by the manager and `run.sh` |
 | `run.sh` | starts the engine, sized from the hardware |
 | `bin/qwenflash-backend` | runs the engine detached (a systemd unit where available) |
