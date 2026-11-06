@@ -84,7 +84,8 @@ Document reading by size (median of three):
 - **An 8 GB card that drives a display now runs.** With 7 GB, no expert fits in VRAM: every pick comes from RAM. It
   still decodes 20 tok/s here and reads a 14K document. On PyTorch 2.11 the same configuration ran out of VRAM on the
   long prompt, so `sizing.py` still refuses it; a real 8 GB card, on a slower PCIe link, will be well below 20 tok/s.
-- **Staged prefill costs about 5.5 s per prompt, whatever its size.** On the whole card a 1K document takes 5.6 s (182
+- **Staged prefill costs about 5.5 s per prompt, whatever its size** (the NVMe, it turned out:
+  [follow-up](#follow-up-2026-11-06-short-prompts-skip-staging)). On the whole card a 1K document takes 5.6 s (182
   tok/s) and an 8K one 5.8 s. Staging-free runs read 1K in 1.2 s and 8K in 4.8 s, even on a 10.5 GB card; staged,
   32K takes 9.6 s and staging-free 17 s. So staging pays off somewhere between 8K and 32K tokens, and below that a
   prompt waits about 6 s for its first token. A 27-token question isn't staged (first token in 0.18-0.55 s).
@@ -100,6 +101,33 @@ Document reading by size (median of three):
 - **Against PyTorch 2.11:** the workload changed (short answers with thinking off, the original's documents), and the
   earlier capped runs had the VRAM CUDA couldn't see on top of their limit. The two reports don't compare row by row.
   For the stack alone, see [torch-2.15](../torch-2.15/REPORT.md).
+
+## Follow-up, 2026-11-06: short prompts skip staging
+
+The ~5.5 s "staging cost" above was the NVMe. Staged prefill copies every expert of a layer that isn't in VRAM; one
+that isn't in the RAM cache either is read from the NVMe each time, and staging doesn't keep it. A fresh server's RAM
+cache starts empty and only decode filled it, so every staged prompt read most of the model from disk (about 43 GB at
+4.05 bpw, ~6 GB/s).
+
+Prompts under 16,384 expert picks per layer (1,638 tokens; nv2's pick buffer holds 16,384) now skip staging. They go
+through nv2's per-pick path, which keeps what it reads in the RAM cache, so later staged prompts read from RAM. Same
+card and settings (4.05 bpw, whole card, standard workload, commit `6e0f68c`):
+
+| | Matrix (staging from 512 picks) | Staging from 16,384 picks |
+|---|---|---|
+| 1K document | 144 tok/s | 712 tok/s (312 on the first trial) |
+| 8K document | 1,129 tok/s | 2,546 tok/s |
+| 32K document | 2,914 tok/s | 4,593 tok/s |
+| 64K document | 4,263 tok/s | 5,449 tok/s |
+| 100K retrieval | 4,364 tok/s | 5,312 tok/s |
+| Answers | 60.9 tok/s | 59.7 tok/s (trials 58.9-59.8) |
+
+On the live service, prompts of 1,375-1,712 tokens got their first token in 1.4 s and 2,000 tokens in 2.6 s, against
+5.6-7.1 s before; 1,628 tokens ran unstaged and 1,642 staged, both without errors. Filling the RAM cache from the NVMe
+at startup instead (the engine's warm start, 5.4 s for 14,854 experts) helped only the first trial's 1K document
+(312 to 446 tok/s) and added 6 s to every start, so it stays off.
+
+The capped rows above were measured before this change; their prefill figures are low for the same reason.
 
 ## Fixed before these runs
 

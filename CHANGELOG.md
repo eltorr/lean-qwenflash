@@ -2,6 +2,30 @@
 
 What changed in this fork, newest first. [FORK.md](FORK.md) describes how it differs from the original.
 
+## 2026-11-06
+
+### Tuning
+
+From the manager's log and the new benchmark ([report](research/vram-scaling-torch-2.15/REPORT.md#follow-up-2026-11-06-short-prompts-skip-staging)):
+
+- **Short prompts skip staging.** Prompts and conversation turns of up to 1,638 tokens no longer go through prefill
+  staging, which read every expert not in VRAM from the NVMe each time and didn't keep it. They fill the RAM cache
+  instead, so longer prompts after them read from RAM. At 4.05 bpw on the whole card:
+  - a 1-2K-token prompt gets its first token in 1.4-2.6 s instead of 6-7;
+  - documents read 1.2-5 times faster (8K: 1,129 to 2,546 tok/s; 100K: 4,364 to 5,312);
+  - answers are as fast as before.
+- **A steadier RAM cache.** The log showed full -> lean -> full every few minutes, and restarts that started small and
+  restarted again to grow:
+  - the RAM cache holds 90% of the experts together with the VRAM cache: 33-35 GiB instead of 40 at 4.05 on a 32 GB
+    card, at the same speed. Free RAM with the model at full went from 3-5 GB to about 12;
+  - a restart reuses the RAM the stopped model held, which WSL hands back to Windows only gradually. It used to start
+    with 8-19 GiB and restart again to grow;
+  - after full runs short of RAM, full starts get a smaller RAM cache for an hour;
+  - the estimate of the model's RAM use beyond its cache rises fast and falls slowly.
+- **Less idle VRAM:** full mode leaves at most 2.4 GB free, down from 3.2 GB on 32 GB cards. It ran stably for days with
+  about 2.1 GB free, before the engine counted the VRAM CUDA can't see under WSL2.
+- **Benchmarks** size the RAM cache the same way, and a model restarted after one gets its RAM cache back.
+
 ## 2026-11-05
 
 ### Security
@@ -65,8 +89,7 @@ From two security reviews of the fork's code.
   ([report](research/vram-scaling-torch-2.15/REPORT.md)):
   - 3.05 bpw decodes 74 tok/s on 30 GB of VRAM, down to 20 on 7 GB; 4.05 decodes 63 down to 30 tok/s;
   - an 8 GB card that drives a display now runs (20 tok/s here), where it ran out of VRAM on PyTorch 2.11;
-  - a staged prompt costs about 5.5 s whatever its size, so prompts under 8-32K tokens read slower than the tables'
-    long-document figures.
+  - a staged prompt cost about 5.5 s whatever its size (the NVMe, it turned out; fixed on 2026-11-06).
 
 ### Engine
 

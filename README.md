@@ -106,8 +106,10 @@ The figures are for Linux; Windows keeps about 8 GB more RAM for itself.
 
 "Capped" rows hold the engine to a smaller card's VRAM. Real smaller cards also have less bandwidth, so expect less
 from them. Measured on PyTorch 2.15 and CUDA 13.2, the way the original's `benchmark.py` measures: short answers with
-thinking off for decode, and a document of up to 100K tokens for prefill. Below 8-32K tokens, prefill is slower than
-these figures: a staged prompt costs about 5.5 s whatever its size ([report](research/vram-scaling-torch-2.15/REPORT.md)).
+thinking off for decode, and a document of up to 100K tokens for prefill ([report](research/vram-scaling-torch-2.15/REPORT.md)).
+The prefill figures were taken before short prompts skipped staging (2026-11-06), which made every document read
+faster: at 4.05 bpw on the whole card, 100K tokens now read at 5,312 tok/s instead of 4,233-4,364, 8K at 2,546
+instead of 1,129, and a 1-2K-token prompt gets its first token in 1.4-2.6 s instead of 6-7.
 
 <!-- measured:begin -->
 | Card (VRAM) | Quant | Context | RAM cache | Prefill | Decode | Measured on |
