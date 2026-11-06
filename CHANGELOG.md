@@ -74,6 +74,16 @@ From two security reviews of the fork's code.
 
 ### Fixes
 
+- **Clean installs on CUDA 13:** the engine looked for CUDA 12's runtime (`libcudart.so.12`) when it set up pinned
+  memory. The fork's machine only worked because the 2.11 install had left it behind; a fresh install has only CUDA
+  13's, so the engine would not start. It now uses the runtime PyTorch loaded. On upgrade, setup removes the CUDA
+  packages an older PyTorch left behind, then reinstalls the current ones, because some share folders with them.
+- **The VRAM limit under WSL2:** CUDA there doesn't see part of what Windows apps use (about 1 GB with a desktop and a
+  browser open). The limit counts everything, so the expert cache overshot it by that much:
+  - emulated cards of 7-16 GB stopped at startup;
+  - a lean profile used about 1 GB more than its budget alongside a game.
+
+  The engine now measures the difference at startup and counts it.
 - **Stopping the model:** under very low RAM, a stop could fail silently, leaving the model running while the
   dashboard showed it stopped. The manager now checks, retries, and keeps tracking a server that won't stop.
 - **Driver check:** setup now checks for driver 595 or newer, and suggests one that is (it used to suggest 570).

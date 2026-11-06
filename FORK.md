@@ -71,10 +71,10 @@ two safety changes: the model server refuses web pages, and it never runs code f
 |---|---|
 | `qwen38/nv2.py`, `nv_tier.py`, `k_lookahead.py`, `exl3_tiers.py` (+ `wsl_pinned.py`) | Pinned host memory works under WSL2 |
 | `qwen38/nv2.py`, `cpu_tier.py` | Built as C++20, which PyTorch 2.15's headers need |
-| `qwen38/expert_cache.py` | Prefill staging holds a whole layer, so 4.05 bpw fits |
+| `qwen38/expert_cache.py` | Prefill staging holds a whole layer, so 4.05 bpw fits; the VRAM limit counts what CUDA can't see under WSL2 |
 | `qwen38/serve.py` (+ `openai_compat.py`, `openai_responses.py`) | `reasoning_effort` mapping; the Responses API; `trust_remote_code` off |
-| `qwen_offload.py` | Configurable VRAM limits; kernels built for the local GPU |
-| `memory_guard.py` | Configurable limit; no crash without a memory cgroup |
+| `qwen_offload.py` | Configurable VRAM limits; kernels built for the local GPU; measures the VRAM CUDA can't see (WSL2) |
+| `memory_guard.py` | Configurable limit; no crash without a memory cgroup; `device_used()` for the VRAM limit |
 | `qwen_server.py` | Prefill chunk from `QWEN_CHUNK`; refuses web pages, and on localhost other host names (DNS rebinding); takes the manager's key; no access log |
 | `download_http.py` | `--branch` and `--sha`, to fetch 4.05 bpw; both quants are pinned to one upload; every file is checked against its hash |
 | `qwen38-flash-offload/bench/sweep.py` | Sends the manager's key when it's set |
@@ -102,7 +102,8 @@ git fetch eltorr
 git cherry-pick 59ca8ce e3ae7c2 f05f734 2f2401c 0f7740f 5e0167e ec034b9
 ```
 
-The security changes to upstream files and the C++20 build are part of larger commits, so take those by hand. The
+The security changes to upstream files, the C++20 build, and the WSL2 VRAM accounting fix (which also loads the
+CUDA runtime PyTorch uses) are part of larger commits, so take those by hand. The
 original's quickstart stays on PyTorch 2.11, which doesn't need C++20.
 
 The rest builds in layers: sizing and `run.sh`, then setup, the manager, benchmarks, and presets.

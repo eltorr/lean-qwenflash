@@ -51,13 +51,21 @@ echo "installing the Python packages pinned in setup/requirements.txt..."
 pip install -q --require-hashes -r setup/requirements.txt \
   --index-url "https://download.pytorch.org/whl/cu${CUDA_VER/./}" --extra-index-url https://pypi.org/simple
 # A PyTorch built for another CUDA leaves its CUDA packages behind (pip keeps them: their names differ). Remove them, so
-# nothing can depend on a runtime that a fresh install doesn't have.
+# nothing can depend on a runtime that a fresh install doesn't have. Some share folders with this CUDA's packages
+# (nvidia/cudnn, nccl, ...), so removing them deletes files those need: reinstall this CUDA's packages afterwards.
 stale=$(pip list --format=freeze 2>/dev/null | sed -n 's/^\(nvidia-[a-z0-9-]*-cu[0-9][0-9]*\)==.*/\1/p' |
         grep -v -- "-cu${CUDA_VER%%.*}$" || true)
 if [ -n "$stale" ]; then
   echo "removing CUDA packages left by an older PyTorch: $(echo "$stale" | tr '\n' ' ')"
   # shellcheck disable=SC2086 # one package name per word
   pip uninstall -q -y $stale
+  nv=$(mktemp)
+  awk '/^[^ #]/{keep = /^nvidia-/} keep' setup/requirements.txt > "$nv"
+  echo "reinstalling this CUDA's packages, whose shared files went with them..."
+  pip install -q --force-reinstall --no-deps --require-hashes -r "$nv" \
+    --index-url "https://download.pytorch.org/whl/cu${CUDA_VER/./}" --extra-index-url https://pypi.org/simple
+  rm -f "$nv"
+  ready=0                                         # so the check below imports torch
 fi
 if [ "$ready" = 1 ]; then
   echo "Python environment ready: torch $(sed -n "s/^__version__ = '\(.*\)'/\1/p" "$SP/torch/version.py")"
