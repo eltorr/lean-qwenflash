@@ -21,10 +21,18 @@ _HOST_ALLOC_PORTABLE, _HOST_ALLOC_MAPPED = 1, 2
 
 
 def _rt():
+    """The CUDA runtime torch loaded (libcudart.so.13 for CUDA 13 builds): a hard-coded libcudart.so.12 loaded a second
+    runtime, or failed where only CUDA 13 is installed."""
     global _RT
     if _RT is None:
-        torch.cuda.init()                     # make sure torch's libcudart is the one already loaded
-        _RT = ctypes.CDLL("libcudart.so.12")
+        torch.cuda.init()
+        path = None
+        try:
+            with open("/proc/self/maps") as f:
+                path = next((line.split()[-1] for line in f if "/libcudart.so" in line), None)
+        except OSError:
+            pass
+        _RT = ctypes.CDLL(path or f"libcudart.so.{torch.version.cuda.split('.')[0]}")
     return _RT
 
 

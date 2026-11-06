@@ -32,7 +32,18 @@ def load(model_dir, store, chunk=2048, cache_tokens=16384, ram_gb=6.0, cpu=False
     torch.cuda.init()
     # JIT-built kernels target the GPU that is actually here (upstream hard-coded 8.9, the RTX 4090)
     os.environ.setdefault('TORCH_CUDA_ARCH_LIST', '%d.%d' % torch.cuda.get_device_capability())
-    _, total = torch.cuda.mem_get_info()
+    free, total = torch.cuda.mem_get_info()
+    # Local patch: QWEN_VRAM_LIMIT_BYTES is device-wide, as NVML counts it (the guard, the manager). Under WSL2 CUDA
+    # doesn't see part of what Windows apps use (~1 GB with a desktop and a browser open), so the expert cache would
+    # overshoot the limit by that much. Measured now, before this process allocates anything but its context.
+    import memory_guard
+    nvml_used = memory_guard.device_used(torch.cuda.current_device())
+    if nvml_used is not None and 'QWEN_VRAM_UNSEEN_BYTES' not in os.environ:
+        unseen = max(0, nvml_used - (total - free))
+        os.environ['QWEN_VRAM_UNSEEN_BYTES'] = str(unseen)
+        if unseen > 64 * 1024 ** 2:
+            print(f'VRAM: other processes use {unseen / 1024 ** 3:.2f} GiB that CUDA does not report here; '
+                  f'counted against the VRAM limit', flush=True)
     # Leave room for CUDA context and non-PyTorch allocations as well as allocator fragmentation.
     torch.cuda.set_per_process_memory_fraction(min(1.0, int(os.environ['QWEN_TORCH_LIMIT_BYTES']) / total))
     if os.environ.get('QWEN_EXL3_SOURCE')=='1':
