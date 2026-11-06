@@ -124,6 +124,9 @@ class FakeService:
     def ext_vram(self, m):
         return 2e9
 
+    def ram_for_start(self, m):
+        return m["ram_avail"]
+
     async def _check(self):
         pass
 

@@ -63,7 +63,7 @@ again syncs the WSL clone; only committed code is synced.
 
 | Profile | VRAM | RAM cache | When |
 |---|---|---|---|
-| **Full** | all that's free, minus ~10% headroom | every expert that isn't in VRAM, as far as RAM allows | nothing else needs the GPU |
+| **Full** | all that's free, minus ~10% headroom (at most 2.4 GB) | with the VRAM cache, 90% of the experts, as far as RAM allows | nothing else needs the GPU |
 | **Lean** | about half the card | 8 GiB | a game or another app needs VRAM or RAM |
 | **Paused** | 0 | 0 | a watched program runs, or VRAM or RAM is critically short |
 
@@ -74,6 +74,16 @@ again syncs the WSL clone; only committed code is synced.
   - A lean model returns to full after the GPU has been clear for 30 s.
 - **Your choice wins:** *Start lean* stays lean until you start full. A request made under pressure wakes the model
   lean and holds off auto-switching for 5 minutes.
+- **The RAM cache:**
+  - It holds 90% of the experts together with the VRAM cache. The rest are rarely picked: at 4.05 bpw on a 32 GB
+    card, 34 and 40 GiB ran at the same speed, and the last 6 GiB only cost the PC RAM.
+  - A restart reuses the RAM the stopped model held. Under WSL2, Windows only sees freed memory again after a few
+    minutes, and sizing from its figure gave restarts a third of the cache.
+  - If full runs short of RAM and drops to lean, the next full starts get a smaller RAM cache for an hour, so
+    full -> lean -> full doesn't repeat.
+  - A full model whose RAM cache was sized while RAM was short grows it, with a restart, once 8 GiB more fits.
+- **Short prompts** (up to 1,638 tokens, or each new turn of a conversation that adds no more) skip prefill
+  staging, which costs about 5.5 s per prompt whatever its size.
 - **Thresholds:** all are in Settings, scaled to the card; 0 means automatic.
 
 [`sizing.py`](../sizing.py) turns a VRAM budget into a plan: the expert cache, the prefill chunk, and whether

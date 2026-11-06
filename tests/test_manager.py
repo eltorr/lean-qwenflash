@@ -92,7 +92,9 @@ class StopTests(unittest.TestCase):
         be.set("running")
         be.pid, be.tier = 123, "full"
         svc = types.SimpleNamespace(observe=False, be=be, host=host, event=lambda k, m: events.append((k, m)),
-                                    ext_at_start=None, perproc_at_start=None)
+                                    ext_at_start=None, perproc_at_start=None, freed=None,
+                                    mon=types.SimpleNamespace(get=lambda: {"ram_avail": 20e9}),
+                                    own_ram_estimate=lambda: 45e9)
         real_sleep = asyncio.sleep
         service.asyncio.sleep = lambda s: real_sleep(0)
         try:
@@ -110,3 +112,64 @@ class StopTests(unittest.TestCase):
         state, events, stops = self.run_stop(["running", "running", "running"])
         self.assertEqual(state, "running")
         self.assertEqual(events[-1][0], "error")
+
+
+class RamTuningTests(unittest.TestCase):
+    """How the RAM cache is sized: through WSL's slow hand-back after a stop, and after running short."""
+    GIB = 2 ** 30
+
+    def svc(self):
+        import types
+        from qwenflash import service
+        s = types.SimpleNamespace(cfg=dict(config.DEFAULTS, quant="4.05", context=262144), learned={}, freed=None,
+                                  ram_soft_cap=None, be=service.Backend(), events=[], ram_before_start=None,
+                                  host=types.SimpleNamespace(kind="windows-wsl", gpu=None))
+        s.event = lambda k, m: s.events.append((k, m))
+        for name in ("ram_for_start", "soft_ram_cap", "cap_after_ram_pressure", "full_ram_gib", "own_ram_estimate",
+                     "ram_overhead", "learned_key", "measure_ram_overhead"):
+            setattr(s, name, types.MethodType(getattr(service.Service, name), s))
+        s.gpu_name = "Test GPU"
+        return s
+
+    def plan(self):
+        import sizing
+        return sizing.plan("4.05", 28.5e9, 262144)
+
+    def test_the_ram_cache_holds_90_percent_of_the_experts(self):
+        import sizing
+        p = self.plan()
+        self.assertAlmostEqual(p["ram_target"], 0.9 * sizing.expert_bytes("4.05") - p["cache"], delta=1)
+        s = self.svc()
+        self.assertEqual(s.full_ram_gib({"ram_avail": 60e9}, p), int(-(-p["ram_target"] // self.GIB)))
+
+    def test_a_restart_reuses_the_ram_wsl_has_not_handed_back_yet(self):
+        import time
+        s = self.svc()
+        p = self.plan()
+        short = s.full_ram_gib({"ram_avail": 12e9}, p)               # just after the stop, as Windows sees it
+        s.freed = (time.time(), 9e9, 45e9)                           # 9 GB free while the server held 45 GB
+        self.assertGreater(s.full_ram_gib({"ram_avail": 12e9}, p), short + 20)
+        s.freed = (time.time() - 400, 9e9, 45e9)                     # too long ago: the figure may be stale
+        self.assertEqual(s.full_ram_gib({"ram_avail": 12e9}, p), short)
+
+    def test_running_short_of_ram_caps_the_next_full_start(self):
+        s = self.svc()
+        p = self.plan()
+        s.be.tier, s.be.ram_gib = "full", 40
+        s.cap_after_ram_pressure({"ram_avail": 4.5e9}, ["GPU busy: game.exe at 90%"])
+        self.assertIsNone(s.ram_soft_cap)                            # not a RAM problem
+        s.cap_after_ram_pressure({"ram_avail": 4.5e9}, ["RAM low (4.5 GB free)"])
+        self.assertEqual(s.soft_ram_cap(), 40 - 4 - 2)               # 3.5 GB short of 8 GB free: 4 GiB, plus 2
+        self.assertEqual(s.full_ram_gib({"ram_avail": 60e9}, p), 34)
+        s.ram_soft_cap = (s.ram_soft_cap[0] - 4000, 34)              # an hour later it lapses
+        self.assertIsNone(s.soft_ram_cap())
+
+    def test_the_ram_overhead_estimate_rises_fast_and_falls_slowly(self):
+        s = self.svc()
+        s.be.ram_gib = 30
+        key = "windows-wsl|4.05"
+        for before, after, want in ((60e9, 60e9 - 30 * self.GIB - 4e9, 4e9), (60e9, 60e9 - 30 * self.GIB - 8e9, 8e9),
+                                    (60e9, 60e9 - 30 * self.GIB - 3e9, 0.8 * 8e9 + 0.2 * 3e9)):
+            s.ram_before_start = before
+            s.measure_ram_overhead({"ram_avail": after})
+            self.assertAlmostEqual(s.learned["_ram_overhead"][key], want, delta=1e6)

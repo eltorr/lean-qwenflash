@@ -35,6 +35,13 @@ PREFILL_EXTRA = 0.3 * GB
 FRAGMENTATION = 0.5 * GB   # torch held 0.8-1 GB more than it used when staging was allocated on small cards
 ELASTIC_SLACK = 0.35 * GB
 CHUNKS = (24576, 16384, 8192, 4096, 2048)   # below 2,048 staging-free 1,536-token chunks do better
+# The VRAM and RAM caches together hold this share of the experts; the rest, picked rarely, comes from NVMe. At 4.05 bpw
+# on the whole card, 89% and 100% ran alike (research/vram-scaling-torch-2.15: 60.9 and 61.0 tok/s, 1% of picks from
+# NVMe in both), and the last 11% took 6 GiB of RAM.
+RAM_COVERAGE = 0.9
+# Forwards with fewer expert picks per layer than this skip prefill staging, which costs ~5.5 s whatever the prompt's
+# size (research/vram-scaling-torch-2.15). nv2's pick buffer holds 16,384: 1,638 tokens at 10 experts each.
+STAGE_MIN_PICKS = 16384
 NO_STAGE_CHUNK = 1536           # without staging, nv2's pick buffer limits a chunk to 1,638 tokens
 KV_BYTES_PER_TOKEN = {2: 7_680, 4: 10_752, 8: 16_896, 16: 28_416}
 
@@ -50,6 +57,11 @@ QUANTS = {
 def expert_bytes(quant):
     """Every routed expert of the model (what VRAM cache + RAM tier + NVMe hold between them)."""
     return QUANTS[quant]["rec"] * EXPERTS_PER_LAYER * MOE_LAYERS
+
+
+def ram_target(quant, vram_cache):
+    """RAM cache that, with `vram_cache` bytes of experts in VRAM, holds RAM_COVERAGE of the model's experts."""
+    return max(0.0, RAM_COVERAGE * expert_bytes(quant) - vram_cache)
 
 
 def fixed_bytes(quant, context, kv_bits=4):
@@ -91,6 +103,7 @@ def plan(quant, budget, context=262144, kv_bits=4, chunk=None, max_slots=None):
     out = {"quant": quant, "context": context, "kv_bits": kv_bits, "budget": budget, "fixed": fixed,
            "reserve": reserve, "cache": cache, "slots": slots, "staging": True, "chunk": None, "ok": False,
            "experimental": budget < 11 * GB, "ram_for_all_experts": max(0.0, expert_bytes(quant) - cache),
+           "ram_target": ram_target(quant, cache),
            "min_budget": min_budget(quant, context, kv_bits)}
     room = cache + reserve - ELASTIC_SLACK
     candidates = [chunk] if chunk else CHUNKS
@@ -105,7 +118,8 @@ def plan(quant, budget, context=262144, kv_bits=4, chunk=None, max_slots=None):
         cache = max(0.0, budget - fixed - r)
         slots = int(cache // rec) // 32 * 32
         out.update(chunk=c, staging=False, ok=True, experimental=True, reserve=r, slots=slots, cache=slots * rec,
-                   ram_for_all_experts=max(0.0, expert_bytes(quant) - slots * rec))
+                   ram_for_all_experts=max(0.0, expert_bytes(quant) - slots * rec),
+                   ram_target=ram_target(quant, slots * rec))
         return out
     out["reason"] = (f"{budget / GB:.1f} GB is not enough at {context // 1024}K context: the model needs about "
                      f"{fixed / GB:.1f} GB before any expert cache, and {out['min_budget'] / GB:.1f} GB in total")
@@ -140,6 +154,8 @@ def engine_env(p, cap_slots=False):
     it to the engine, which measures free VRAM itself and gets a slightly bigger cache than this model predicts.
     Budgets of 16 GB and more keep the tuned upstream reserve/elastic settings."""
     env = {"QWEN_CHUNK": str(p["chunk"])}
+    if p["staging"]:
+        env["QWEN38_EC_STAGE_MIN"] = str(STAGE_MIN_PICKS)
     if cap_slots:
         env["QWEN38_EC_MAX_SLOTS"] = str(p["slots"])
     if not p["staging"]:
@@ -163,9 +179,11 @@ PLATFORMS = {"linux": "Linux", "windows-wsl": "Windows (WSL2)"}
 
 
 def headroom_bytes(vram_total, display=True):
-    """VRAM left free in full mode so the desktop and other apps can grow: ~10% of the card, 1.2-3.2 GB. A card
-    that drives no display keeps only 0.6 GB on small cards (an 8 GB card needs every bit; measured at 8 GB)."""
-    return min(3.2 * GB, max((1.2 if display else 0.6) * GB, 0.1 * vram_total))
+    """VRAM left free in full mode so the desktop and other apps can grow: ~10% of the card, 1.2-2.4 GB. A card
+    that drives no display keeps only 0.6 GB on small cards (an 8 GB card needs every bit; measured at 8 GB). On the
+    32 GB card, full mode ran stably for days with ~2.1 GB actually free (3.2 GB set, ~1.1 GB of it unseen by CUDA
+    under WSL2 until the engine counted that)."""
+    return min(2.4 * GB, max((1.2 if display else 0.6) * GB, 0.1 * vram_total))
 
 
 def card_budget(vram_total, display=True):
@@ -228,7 +246,7 @@ def _candidate(quant, budget, ram_total, platform, kv_bits):
         return None
     policy = ram_policy(ram_total)
     avail = ram_total - OS_IDLE[platform]
-    cache = ram_cache_gib(p["ram_for_all_experts"], avail, policy, RAM_OVERHEAD[platform])
+    cache = ram_cache_gib(p["ram_target"], avail, policy, RAM_OVERHEAD[platform])
     if platform == "windows-wsl":
         cache = min(cache, int((wsl_memory_bytes(ram_total) - RAM_OVERHEAD[platform]) // GIB))
     ram_used = cache * GIB + RAM_OVERHEAD[platform]
@@ -261,7 +279,7 @@ def baseline(vram_total, ram_total, display=True, platform="linux", kv_bits=4):
                          f"system's own use")
         return out
     best = hi if (hi and hi["ram_fits"] and hi["context"] == 262144 and hi["staging"] and hi["chunk"] >= 16384
-                  and hi["in_memory"] >= 0.97) else lo
+                  and hi["in_memory"] >= RAM_COVERAGE - 0.005) else lo
     alt = lo if best is hi else hi
     out.update(best, ok=True, experimental=budget < 11 * GB,
                alternative=({k: alt[k] for k in ("quant", "context", "chunk", "staging", "ram_cache_gib",
@@ -456,7 +474,7 @@ def main(argv=None):
             return 3
         for k, v in engine_env(p).items():
             print(f"export {k}={v}")
-        print(f"QWEN_RAM_ALL_GIB={int(p['ram_for_all_experts'] // GIB) + 1}")
+        print(f"QWEN_RAM_ALL_GIB={int(p['ram_target'] // GIB) + 1}")
     return 0 if p["ok"] else 3
 
 

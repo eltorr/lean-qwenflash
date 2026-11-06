@@ -42,6 +42,8 @@ import sizing  # noqa: E402
 # A first guess per platform; after each start the manager measures the real figure and uses that from then on.
 RAM_OVERHEAD = sizing.RAM_OVERHEAD
 RAM_GRACE_S = 90                 # after a start, page cache from loading takes a while to be handed back
+FREED_S = 300                    # how long a stopped server's RAM counts as reusable for the next start (WSL)
+SOFT_CAP_S = 3600                # how long a RAM cache that ran short caps the next full starts
 UI_FILE = REPO / "qwenflash" / "ui" / "index.html"
 SIGNIN_FILE = REPO / "qwenflash" / "ui" / "signin.html"   # the root without the private link
 PAGES = ("/", "/_switcher", "/_switcher/", "/_switcher/index.html")
@@ -114,6 +116,8 @@ class Service:
         self.sev_since = self.mod_since = self.clear_since = None
         self.last_transition = 0.0
         self.last_stop_t = time.time()
+        self.freed = None                # (time, free RAM, the server's RAM) at the last stop of a running server
+        self.ram_soft_cap = None         # (time, GiB) after full ran short of RAM
         self.events = collections.deque(maxlen=300)
         self.hist = collections.deque(maxlen=400)
         self.metrics = collections.deque(maxlen=200)
@@ -170,7 +174,7 @@ class Service:
         return max(floor, min(16 * GB, 0.55 * m["vram_total"]))
 
     def headroom(self, m):
-        """VRAM left free in full mode: the setting, or ~10% of the card (1.2-3.2 GB; 0.6 GB minimum on a card that
+        """VRAM left free in full mode: the setting, or ~10% of the card (1.2-2.4 GB; 0.6 GB minimum on a card that
         drives no display) when 0 (automatic)."""
         if self.cfg["full_vram_headroom_gb"] > 0:
             return self.cfg["full_vram_headroom_gb"] * GB
@@ -198,15 +202,42 @@ class Service:
         reserve = (reserve_gb if reserve_gb is not None else self.cfg["ram_reserve_gb"]) * GB
         return m["ram_avail"] + self.own_ram_estimate() - reserve
 
+    def ram_for_start(self, m):
+        """RAM a (re)started model can have: what is free, plus the model's own if it is running. Right after a
+        stop, also what the stopped server held: WSL hands freed memory back to Windows only gradually (minutes),
+        but a new server in the VM reuses it at once. Sized from Windows' figure alone, a restart got a third of
+        the RAM cache it had, then restarted again to grow it."""
+        avail = m["ram_avail"] + self.own_ram_estimate()
+        f = self.freed
+        if f and self.be.state not in ("running", "starting") and time.time() - f[0] < FREED_S:
+            avail = max(avail, f[1] + f[2])
+        return avail
+
+    def soft_ram_cap(self):
+        c = self.ram_soft_cap
+        return c[1] if c and time.time() - c[0] < SOFT_CAP_S else None
+
+    def cap_after_ram_pressure(self, m, reasons):
+        """Full ran short of RAM: the next full start gets a smaller RAM cache for a while, or full -> lean -> full
+        repeats every few minutes (lean frees the RAM, full takes it again)."""
+        if self.be.tier != "full" or not self.be.ram_gib or not any(r.startswith("RAM") for r in reasons):
+            return
+        short = math.ceil(max(0.0, (self.cfg["ram_lean_gb"] + 2) * GB - m["ram_avail"]) / GIB)
+        cap = int(max(self.cfg["lean_ram_gb"], self.be.ram_gib - short - 2))
+        self.ram_soft_cap = (time.time(), cap)
+        self.event("learned", f"RAM ran short with a {self.be.ram_gib} GiB RAM cache: full starts get at most {cap} "
+                              f"GiB for the next {SOFT_CAP_S // 60} min")
+
     def full_ram_gib(self, m, plan):
-        """RAM tier for a full start: enough for every expert outside VRAM, shrunk to what the host can spare
-        right now (never below lean's). VRAM is what makes full fast; a smaller RAM tier only sends rarer experts
-        to NVMe."""
+        """RAM tier for a full start: enough that VRAM + RAM hold 90% of the experts (sizing.RAM_COVERAGE), shrunk
+        to what the host can spare (never below lean's). VRAM is what makes full fast; a smaller RAM tier only sends
+        rarer experts to NVMe."""
         cfg = self.cfg
-        caps = [c for c in (cfg["max_ram_cache_gib"], self.learned.get(self.learned_key(), {}).get("ram_cap")) if c]
+        caps = [c for c in (cfg["max_ram_cache_gib"], self.learned.get(self.learned_key(), {}).get("ram_cap"),
+                            self.soft_ram_cap()) if c]
         # free RAM after the start stays clearly above the scale-back threshold, or full -> lean -> full would loop
-        return sizing.ram_cache_gib(plan["ram_for_all_experts"], m["ram_avail"] + self.own_ram_estimate(), cfg,
-                                    self.ram_overhead(), min(caps) if caps else None)
+        return sizing.ram_cache_gib(plan["ram_target"], self.ram_for_start(m), cfg, self.ram_overhead(),
+                                    min(caps) if caps else None)
 
     def ram_need_lean(self):
         return self.cfg["lean_ram_gb"] * GIB + self.ram_overhead()
@@ -226,7 +257,8 @@ class Service:
         key = f"{self.host.kind}|{self.cfg['quant']}"
         store = self.learned.setdefault("_ram_overhead", {})
         prev = store.get(key)
-        store[key] = over if prev is None else 0.5 * prev + 0.5 * over
+        # quick to rise, slow to fall: underestimating it is what sends full back to lean
+        store[key] = over if prev is None or over > prev else 0.8 * prev + 0.2 * over
         config.save_json("learned.json", self.learned)
         self.event("learned", f"the model uses {over / GB:.1f} GB of RAM beyond its {self.be.ram_gib} GiB cache; "
                               f"sizing the RAM cache with {store[key] / GB:.1f} GB from now on")
@@ -321,7 +353,7 @@ class Service:
         plan = self.plan_for(tier, m)
         if tier == "full" and host.ram_settle_s:
             # just after a stop, WSL is still handing RAM back (~15-30 s): wait for it before sizing the RAM tier
-            need = math.ceil(plan["ram_for_all_experts"] / GIB)
+            need = math.ceil(plan["ram_target"] / GIB)
             while self.full_ram_gib(m, plan) < need and time.time() - self.last_stop_t < host.ram_settle_s:
                 await asyncio.sleep(2)
                 m = await self.fresh_sample(time.time())
@@ -435,6 +467,8 @@ class Service:
         if self.be.state == "stopped" and not self.be.pid:
             return
         was = self.be.tier
+        m = self.mon.get() if self.be.state == "running" else None
+        own = self.own_ram_estimate() if m else 0.0
         self.be.set("stopping")
         # Check that it's gone: under severe memory pressure the stop command itself can fail, and a server still
         # holding the GPU and RAM must not be taken for stopped.
@@ -463,6 +497,8 @@ class Service:
         self.ext_at_start = self.perproc_at_start = None
         self.be.set(final_state)
         self.last_transition = self.last_stop_t = time.time()
+        if m:
+            self.freed = (self.last_stop_t, m["ram_avail"], own)
         if final_state == "stopped":
             self.event("stop", f"stopped{' ' + was if was else ''}: {reason}")
 
@@ -1055,6 +1091,7 @@ class Service:
             if self.sev_since and now - self.sev_since >= cfg["severe_after_s"] and not overridden:
                 waited = now - self.sev_since
                 if self.in_flight == 0 or waited >= cfg["severe_max_wait_s"]:
+                    self.cap_after_ram_pressure(m, reasons)
                     self.spawn(self.stop("pressure: " + "; ".join(reasons), "pressure"))
                 return
             # scaling DOWN is never delayed by the dwell time (backing off from a game should be quick);
@@ -1063,6 +1100,7 @@ class Service:
                     and idle and not overridden):
                 why = "pressure: " + "; ".join(reasons)
                 self.manual_lean = False
+                self.cap_after_ram_pressure(m, reasons)
                 if cfg["pressure_response"] == "lean" and self.best_tier(m, level="moderate") == "lean":
                     self.spawn(self.restart("lean", why))
                 else:

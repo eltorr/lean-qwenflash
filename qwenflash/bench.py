@@ -641,13 +641,13 @@ class Bench:
     def engine_env(self, r, plan, m, budget):
         """What the manager would pass the engine for this run (a capped run also gets the emulated card's guard)."""
         svc, cfg = self.svc, self.svc.cfg
-        need_all = plan["ram_for_all_experts"] if plan["ok"] else sizing.expert_bytes(r["quant"])
+        target = plan["ram_target"] if plan["ok"] else sizing.RAM_COVERAGE * sizing.expert_bytes(r["quant"])
         if r["ram"]:
             ram_gib = r["ram"]
         else:
             caps = [c for c in (cfg["max_ram_cache_gib"],
                                 svc.learned.get(svc.learned_key(r["quant"], r["context"]), {}).get("ram_cap")) if c]
-            ram_gib = sizing.ram_cache_gib(need_all, m["ram_avail"], cfg, svc.ram_overhead(r["quant"]),
+            ram_gib = sizing.ram_cache_gib(target, svc.ram_for_start(m), cfg, svc.ram_overhead(r["quant"]),
                                            min(caps) if caps else None)
         env = {"QUANT": r["quant"], "CONTEXT": str(r["context"]), "PORT": str(cfg["backend_port"]),
                "HOST": "127.0.0.1", "RAM_GB": str(ram_gib), "QWENFLASH_BACKEND_KEY": svc.backend_key}
@@ -740,6 +740,9 @@ class Bench:
         elif rec.get("error") and svc.host.follower:
             rec["log_tail"] = svc.host.follower.tail(8)
         await asyncio.to_thread(svc.host.backend_stop)
+        # the next run, or the model afterwards, can reuse this server's RAM before WSL has handed it back
+        svc.last_stop_t = time.time()
+        svc.freed = (svc.last_stop_t, svc.ram_for_start(m), 0.0)
         if not rec.get("error"):
             rec["previous"] = compare(rec, previous_record(rec, skip=self.dir))
         rec["finished"] = True

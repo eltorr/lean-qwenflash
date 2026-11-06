@@ -74,6 +74,19 @@ class SizingTests(unittest.TestCase):
         # a measurement only labels a preset with a similar RAM cache
         self.assertFalse(b(16, 32)["measured"])
 
+    def test_short_prompts_skip_staging(self):
+        staged = sizing.plan("4.05", 28.5e9, 262144)
+        self.assertTrue(staged["staging"])
+        self.assertEqual(sizing.engine_env(staged)["QWEN38_EC_STAGE_MIN"], "16384")   # 1,638 tokens x 10 experts
+        free = sizing.plan("3.05", 10.5e9, 131072)
+        self.assertFalse(free["staging"])
+        self.assertNotIn("QWEN38_EC_STAGE_MIN", sizing.engine_env(free))
+
+    def test_full_mode_headroom(self):
+        self.assertAlmostEqual(sizing.headroom_bytes(32.6e9), 2.4e9)      # ran stably with ~2.1 GB free
+        self.assertAlmostEqual(sizing.headroom_bytes(16.3e9), 1.63e9)
+        self.assertAlmostEqual(sizing.headroom_bytes(8.5e9, display=False), 0.85e9)
+
     def test_readme_tables_are_generated(self):
         readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
         for name, body in (("presets", sizing.presets_table()), ("measured", sizing.measured_table())):

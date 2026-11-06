@@ -78,8 +78,8 @@ DEFAULTS = {
     "ram_reserve_gb": 6.0,              # RAM always left to the host OS and other apps
     "lean_vram_gb": 0.0,                # VRAM the model keeps when other apps need the GPU (0 = automatic)
     "lean_ram_gb": 8,
-    "full_vram_headroom_gb": 0.0,       # VRAM left free in full mode (0 = ~10% of the card, 1.2-3.2 GB)
-    "max_ram_cache_gib": 0,             # 0 = automatic (enough to hold every expert that is not in VRAM)
+    "full_vram_headroom_gb": 0.0,       # VRAM left free in full mode (0 = ~10% of the card, 1.2-2.4 GB)
+    "max_ram_cache_gib": 0,             # 0 = automatic (with the VRAM cache, 90% of the experts)
     "auto_recover": True,               # restart a crashed model, stepping its VRAM budget down after an OOM
     "watchlist": [],
     "util_ignore": ["dwm.exe", "csrss.exe", "system", "explorer.exe", "xorg", "gnome-shell", "kwin_x11",

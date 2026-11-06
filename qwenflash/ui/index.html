@@ -541,9 +541,9 @@ const FIELDS = [
   ]],
   ["Budgets", [
     ["lean_vram_gb", "Lean profile VRAM (GB)", "number", null, "0 = automatic: about half the card, at least what the context needs."],
-    ["full_vram_headroom_gb", "VRAM left free in full mode (GB)", "number", null, "0 = automatic: ~10% of the card (1.2-3.2 GB)."],
+    ["full_vram_headroom_gb", "VRAM left free in full mode (GB)", "number", null, "0 = automatic: ~10% of the card (1.2-2.4 GB)."],
     ["lean_ram_gb", "Lean profile RAM cache (GiB)", "number"],
-    ["max_ram_cache_gib", "Largest RAM cache in full mode (GiB)", "number", null, "0 = automatic: enough for every expert that is not in VRAM, within what the system can spare."],
+    ["max_ram_cache_gib", "Largest RAM cache in full mode (GiB)", "number", null, "0 = automatic: with the VRAM cache, 90% of the experts (the rest are rarely used), within what the system can spare."],
     ["ram_reserve_gb", "RAM always left for the system and other apps (GB)", "number"],
     ["auto_recover", "Restart the model automatically if it crashes", "check", null, "After an out-of-memory crash the next start uses a smaller budget."],
   ]],
