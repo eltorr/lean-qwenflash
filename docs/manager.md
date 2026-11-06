@@ -100,17 +100,19 @@ qwenflash bench                      this machine's settings on the whole card
 qwenflash bench quants               3.05 and 4.05 bpw
 qwenflash bench lean                 the lean profile
 qwenflash bench 4.05:22:262144       4.05 bpw held to 22 GB of VRAM (a 24 GB card), 256K context
-qwenflash bench matrix               8-32 GB cards emulated on a 32 GB one: the README's measured table (a day)
-  --workload quick                   ~15 min a run instead of 40-70 (on a 32 GB card)
+qwenflash bench matrix               8-32 GB cards emulated on a 32 GB one: the README's measured table (~2 h)
+  --workload quick                   ~2 min a run instead of 5-10
   --out research/NAME/results        also write the results there
 qwenflash bench --resume             continue the last benchmark that was cut short
 qwenflash bench --list | --table FOLDER | --sizing FOLDER
 ```
 
-- **What a run measures:**
-  - five answers, each to its natural end (the output is never capped);
-  - a long document with one fact to find;
-  - prompt reading at 8K, 16K, 32K and 64K tokens, from fresh random tokens so nothing is cached;
+- **What a run measures,** the way the original's `benchmark.py` does, so results compare with MaxDevv's:
+  - thinking off and greedy decoding, with his prompts; every answer ends on its own (the output is never capped);
+  - a warm-up, then three trials of one answer (a jet engine in three paragraphs, about 250 tokens) and documents of
+    1K, 8K, 32K and 64K tokens, each read and answered in one sentence. Each trial's text differs from the start, so
+    nothing comes from the prompt cache;
+  - his retrieval test: three access codes at 10%, 50% and 90% of a document of up to 100K tokens;
   - startup time, VRAM, and where the experts came from (VRAM, RAM or NVMe).
 - **The PC comes first.** When a game or another app needs the GPU (an app on the watchlist, another app's GPU load,
   or its VRAM crowding the card) or RAM nearly runs out, the run steps aside: its server stops, and the run starts

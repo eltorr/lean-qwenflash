@@ -260,7 +260,7 @@ def cmd_bench(cfg, a):
         print(bench.table(records))
         p = bench.prefill_table(records)
         if p:
-            print("\nPrompt reading (fresh random tokens):\n\n" + p)
+            print("\nDocument reading by size:\n\n" + p)
         return 0
     if a.list:
         print("Presets:")
@@ -345,7 +345,7 @@ def bench_results(records, a):
         print("\n" + bench.table(records))
         p = bench.prefill_table(records)
         if p:
-            print("\nPrompt reading (fresh random tokens):\n\n" + p)
+            print("\nDocument reading by size:\n\n" + p)
     return 0 if records and not any(r.get("error") for r in records) else 1
 
 
@@ -371,7 +371,8 @@ def main(argv=None):
     b.add_argument("runs", nargs="*", help="presets: current (default), lean, quants, matrix; or "
                                            "QUANT:VRAM_GB|card:CONTEXT[:nostage][:ram=GIB]")
     b.add_argument("--workload", choices=("quick", "standard"), default="standard",
-                   help="quick: ~15 min a run; standard: ~40-70 min a run (default; smaller cards take longer)")
+                   help="quick: ~2 min a run; standard: ~5-10 min a run (default); both follow the original's "
+                        "benchmark.py")
     b.add_argument("--resume", action="store_true",
                    help="continue the latest unfinished benchmark: its runs left, into its folder")
     b.add_argument("--out", help="also write each run's JSON into this folder, e.g. research/NAME/results")

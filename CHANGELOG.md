@@ -49,7 +49,10 @@ From two security reviews of the fork's code.
     emulated on a 32 GB one;
   - the manager frees the GPU for it and puts the model back afterwards;
   - each result records the machine and its stack, and the change since the last run of the same configuration;
-  - prompt reading follows the engine's `sweep.py` protocol (fresh random tokens at 8K-64K).
+  - it measures the way the original's `benchmark.py` does, so results compare with MaxDevv's: thinking off, greedy
+    decoding, his prompts and filler documents (1K-64K tokens), and his retrieval test. Answers end on their own after
+    about 250 tokens, so a run takes 5-10 minutes and the matrix about 2 hours. A first try with thinking on and
+    open-ended prompts wrote 12,000-55,000 tokens an answer and would have taken over a day.
 - **The PC comes first:** when a game or another app needs the GPU, or RAM nearly runs out, the run steps aside and
   starts again once the PC is free. A benchmark cut short by a cancel, a restart or a reboot resumes where it stopped
   (`qwenflash bench --resume`, or the tab's Resume button).

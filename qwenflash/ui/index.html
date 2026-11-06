@@ -277,15 +277,16 @@
     <pre class="console" id="setupOut">Output of setup steps appears here.</pre>
   </section>
   <section class="panel" id="p-bench">
-    <p class="muted" style="margin-top:0">Measures this machine: starts the model in each configuration, generates answers to their
-      natural end, and times prompt reading at fixed sizes. It takes the GPU: the model stops for the run, requests get an
+    <p class="muted" style="margin-top:0">Measures this machine the way the original's <code>benchmark.py</code> does: starts the model
+      in each configuration, times short answers to their natural end with thinking off, and times reading documents of
+      fixed sizes. It takes the GPU: the model stops for the run, requests get an
       error meanwhile, and the model comes back afterwards. When a game or another app needs the GPU or RAM, the run steps
       aside and starts again once the PC is free. <code>qwenflash bench</code> does the same from a terminal.</p>
     <div class="benchbar local-only">
       <select id="benchRuns" aria-label="What to measure"></select>
       <select id="benchWorkload" aria-label="Workload">
-        <option value="quick">Quick · about 15 min a run</option>
-        <option value="standard">Standard · about an hour a run</option>
+        <option value="quick">Quick · about 2 min a run</option>
+        <option value="standard">Standard · about 5-10 min a run</option>
       </select>
       <button class="primary" id="benchStart">Start benchmark</button>
       <button id="benchCancel" style="display:none">Cancel</button>
@@ -687,7 +688,7 @@ function renderBench(r) {
   $("benchTable").innerHTML = r.results.length ? head + r.results.map((x) => {
     if (x.error) return `<tr><td>${esc(x.label)}</td><td class="err" colspan="${8 + sizes.length}">${esc(x.error)}</td></tr>`;
     const pv = x.previous || {}, pp = pv.prefill_pct || {};
-    const doc = x.document ? `${benchCell(x.document.tps)}${x.document.found ? "" : " · fact missed"}${benchDelta(pv.document_pct)}` : "-";
+    const doc = x.document ? `${benchCell(x.document.tps)}${x.document.found ? "" : " · codes missed"}${benchDelta(pv.document_pct)}` : "-";
     const tip = (x.stack ? `PyTorch ${x.stack.torch} · CUDA ${x.stack.cuda} · driver ${x.stack.driver} · commit ${x.stack.commit}` : "") +
       (pv.date ? ` · % compared with ${pv.date}` : "");
     return `<tr title="${esc(tip)}"><td>${esc(x.label)}</td><td>${benchCell(x.decode, " tok/s", 1)}${benchDelta(pv.decode_pct)}</td><td>${doc}</td>` +

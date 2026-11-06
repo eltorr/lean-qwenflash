@@ -13,13 +13,15 @@ the expert cache, and QWEN_VRAM_GUARD_BYTES stops the server past it, as running
 smaller card's bandwidth can't be emulated, so real smaller cards are slower. ":nostage" forces staging-free prefill
 (1,536-token chunks); ":ram=GIB" sets the RAM cache (default: what the full profile would get now).
 
-Workloads. Every answer runs to its natural end; output is never capped, and answers of 5,000-10,000 tokens are
-common. Times are for a 32 GB card; smaller cards answer more slowly, so their runs take longer:
-  quick     two answers, then prompt reading at 8K and 32K tokens                                 ~15 min a run
-  standard  a warm-up and five answers, a long document with one fact to find, then prompt
-            reading at 8K, 16K, 32K and 64K tokens (3 each)                                  ~40-70 min a run
-Prompt reading uses fresh random tokens, so nothing comes from the prefix cache, timed to the first generated token
-(the protocol of qwen38-flash-offload/bench/sweep.py). The long document is natural text, as clients send it.
+Workloads follow the original's benchmark.py (MaxDevv), so results compare with his: thinking off, greedy decoding,
+his prompts, and every answer to its natural end (output is never capped; his answers end after ~250 tokens). A warm-up
+first (his "17 times 23", then one unscored trial, so cold caches don't count), then trials of one answer ("explain how
+a jet engine works in three concise paragraphs") and documents of his filler text, each read and answered in one
+sentence. Each trial's text differs from the start, so nothing comes from the prefix cache.
+  quick     1 trial: the answer, documents of 1K and 8K tokens                                   ~2 min a run
+  standard  3 trials: the answer, documents of 1K, 8K, 32K and 64K tokens; then his retrieval
+            test: three access codes at 10%, 50% and 90% of a document of up to 100K tokens      ~5-10 min a run
+Documents that don't fit the run's context are skipped; the retrieval document is sized to it.
 
 The PC comes first. When a game or another app needs the GPU (a watched app, another app's GPU load, or its VRAM
 crowding the card) or RAM nearly runs out, the run steps aside: its server stops, the benchmark waits until the PC has
@@ -34,7 +36,6 @@ folder's _plan.json lists the benchmark's runs, for resuming.
 import asyncio
 import collections
 import json
-import random
 import re
 import statistics
 import sys
@@ -59,20 +60,22 @@ MATRIX = ("3.05:30:262144", "3.05:22:262144", "3.05:14.5:262144", "3.05:10.5:655
           "3.05:8:16384:nostage", "3.05:7:16384:nostage", "4.05:30:262144", "4.05:22:262144", "4.05:14.5:262144",
           "4.05:10.5:32768:nostage")
 WORKLOADS = {
-    "quick": {"answers": 2, "warmup": False, "document": False, "prefill": (8192, 32768), "reps": 1},
-    "standard": {"answers": 5, "warmup": True, "document": True, "prefill": (8192, 16384, 32768, 65536), "reps": 3},
+    "quick": {"trials": 1, "documents": (1024, 8192), "retrieval": False},
+    "standard": {"trials": 3, "documents": (1024, 8192, 32768, 65536), "retrieval": True},
 }
-# the same prompts as the runs before this tool (research/vram-scaling), so answer speeds stay comparable
-PROMPTS = (
-    "Explain how a B+ tree handles insertions that split nodes, with a worked example.",
-    "Write a Rust function that parses an RFC 3339 timestamp without external crates, with tests.",
-    "Compare Raft and Paxos for a team choosing a consensus algorithm. Be concrete.",
-    "Write a bash script that rotates logs older than 7 days, compresses them, and keeps 30 archives.",
-    "Write a TypeScript React hook for debounced search with cancellation via AbortController.",
-)
-WARMUP = "Write a Python asyncio TCP port scanner with a concurrency limit, timeouts, and a CLI. Include docstrings."
-NEEDLE = "violet-otter-42"
-TOKENS_PER_HELPER = 22.5            # measured: 4,200 filler functions = 94,466 prompt tokens
+# The original's benchmark.py (MaxDevv): its prompts, filler text and retrieval test, word for word
+PROTOCOL = "benchmark.py"           # recorded with each run; runs are compared only with runs of the same protocol
+WARMUP = ("Compute 17 times 23. Reply with only the number.",
+          "Trial warm-up: Explain how a jet engine works in three concise paragraphs.")
+ANSWER = "Trial {t}: Explain how a jet engine works in three concise paragraphs."
+DOC_HEAD = "Trial {t}, document {size}: Read the following document."
+DOC_TAIL = "Now write exactly one sentence explaining why the sky is blue."
+FILLER = "The fox observes the river, while the engineer records temperature and pressure. "
+CODES = ((0.1, "ARCTIC", "739164"), (0.5, "DESERT", "285903"), (0.9, "FOREST", "614827"))
+RETRIEVAL_HEAD = "Read the following document carefully and retain its access codes."
+RETRIEVAL_TAIL = ("What are the secret access codes for ARCTIC, DESERT, and FOREST? Reply only with the three codes in "
+                  "that order.")
+RETRIEVAL_MAX = 100000              # the longest context in the original's README table, short of 262K
 SETTLE_S = 3                        # after stopping a server, before reading free VRAM
 WATCH_S = 1.0                       # how often a run checks whether the PC needs the GPU or RAM back
 YIELD_AFTER_S = 10                  # how long the PC must need them before the run steps aside
@@ -137,20 +140,6 @@ def expand(specs, cfg, lean_gb=None):
 
 
 # -------------------------------------------------------------------------------------------------------------- engine
-def random_ids(n, seed):
-    rng = random.Random(seed)
-    return [rng.randrange(1000, 150000) for _ in range(n)]
-
-
-def document(context):
-    """A long code file with one fact in the middle, sized to the context (at most ~94K tokens)."""
-    n = int(min(94000, context - 6000) / TOKENS_PER_HELPER)
-    filler = "".join(f"def helper_{i}(x):\n    return x * {i} + {i % 7}\n\n" for i in range(n))
-    half = len(filler) // 2
-    doc = filler[:half] + f"\n# NOTE: the deployment password is '{NEEDLE}'.\n" + filler[half:]
-    return doc + "\n\nWhat is the deployment password mentioned in the code? Answer in one line."
-
-
 class Client:
     """HTTP to the engine under test, with the manager's key on every request."""
 
@@ -162,6 +151,25 @@ class Client:
         with urllib.request.urlopen(urllib.request.Request(self.base + path, headers=self.headers),
                                     timeout=timeout) as r:
             return json.loads(r.read())
+
+    def post(self, path, payload, timeout=60):
+        req = urllib.request.Request(self.base + path, json.dumps(payload).encode(), self.headers)
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read())
+
+    def tokens(self, text):
+        return len(self.post("/tokenize", {"prompt": text})["tokens"])
+
+    def document(self, head, size, tail, codes=False):
+        """The original's document: head, its filler text to `size` tokens less 40, tail. codes: its retrieval test,
+        an access code in place of the filler at 10%, 50% and 90%."""
+        if not getattr(self, "per_sentence", None):
+            self.per_sentence = (self.tokens(FILLER * 200) - self.tokens(FILLER * 100)) / 100
+        n = max(10, int((size - 40 - self.tokens(head + "\n")) / self.per_sentence))
+        body = [FILLER] * n
+        for frac, name, value in codes and CODES or ():
+            body[int(n * frac)] = f"\nThe secret access code for {name} is {value}.\n"
+        return head + "\n" + "".join(body) + "\n" + tail
 
     def events(self, path, payload, timeout=7200):
         """A streamed request's server-sent events, as (arrival time, event)."""
@@ -176,22 +184,11 @@ class Client:
                     return
                 yield time.perf_counter(), json.loads(body)
 
-    def read_prompt(self, n, seed):
-        """Prompt reading in tokens/s: n fresh random tokens, timed to the first generated token. Leaving then ends
-        the request (the server stops a job whose client is gone)."""
-        t0 = time.perf_counter()
-        ev = self.events("/generate", {"input_ids": random_ids(n, seed), "stream": True,
-                                       "sampling_params": {"temperature": 0}})
-        try:
-            for t, _ in ev:
-                return n / (t - t0)
-        finally:
-            ev.close()
-        raise RuntimeError("the server streamed nothing")
-
     def answer(self, content):
-        """One chat answer, streamed to its natural end (no max_tokens)."""
-        body = {"model": "qwen3.8-flash-next", "stream": True, "messages": [{"role": "user", "content": content}]}
+        """One chat answer as the original's benchmark.py asks for it: thinking off, greedy, streamed to its natural
+        end (no max_tokens)."""
+        body = {"model": "qwen3.8-flash-next", "stream": True, "temperature": 0,
+                "chat_template_kwargs": {"enable_thinking": False}, "messages": [{"role": "user", "content": content}]}
         t0 = time.perf_counter()
         first = last = usage = None
         text = []
@@ -266,6 +263,8 @@ def unfinished():
             plan = json.loads((d / PLAN).read_text())
         except (OSError, ValueError):
             continue                                   # from before resuming existed
+        if plan.get("protocol") != PROTOCOL:
+            return None                                # measured another way: finishing it would mix the two
         done = {r["label"] for r in load_records(d) if counts(r)}
         left = [r for r in plan.get("runs") or [] if isinstance(r, dict) and r.get("label") not in done]
         return (d, plan, left) if left else None
@@ -304,6 +303,7 @@ def previous_record(rec, skip=None):
         except (OSError, ValueError):
             continue
         if (not old.get("error") and old.get("workload") == rec.get("workload")
+                and old.get("protocol") == rec.get("protocol")
                 and (old.get("host") or {}).get("gpu") == (rec.get("host") or {}).get("gpu")):
             return dict(old, _dir=d.name)
     return None
@@ -334,7 +334,8 @@ def summary(r):
             "model_vram_gb": r.get("model_vram_gb"),
             "prefill": {n: v.get("median") for n, v in (r.get("prefill") or {}).items() if v.get("median")},
             "document": ({"tps": round(long["prefill_tps"]), "tokens": long.get("prompt_tokens"),
-                          "found": long.get("needle_found")} if long.get("prefill_tps") else None),
+                          "found": long.get("codes_found", long.get("needle_found"))}
+                         if long.get("prefill_tps") else None),
             "picks": (f"{e['picks_vram_pct']:.0f} / {e['picks_ram_pct']:.0f} / {e['picks_nvme_pct']:.0f}"
                       if e.get("picks_vram_pct") is not None else None),
             "error": r.get("error"), "previous": r.get("previous"), "stack": r.get("stack"), "date": r.get("date")}
@@ -381,7 +382,8 @@ def table(records):
         picks = (f"{e['picks_vram_pct']:.0f} / {e['picks_ram_pct']:.0f} / {e['picks_nvme_pct']:.0f} %"
                  if e.get("picks_vram_pct") is not None else "-")
         prefill = (f"{long['prefill_tps']:,.0f} tok/s ({long['prompt_tokens'] // 1000}K prompt"
-                   f"{'' if long.get('needle_found') else ', needle missed'})" if long.get("prefill_tps") else "-")
+                   f"{'' if long.get('codes_found', long.get('needle_found')) else ', missed what it had to find'})"
+                   if long.get("prefill_tps") else "-")
         out.append(f"{head} {e.get('slots') or 0:,} | {picks} | **{fmt(r['decode_tps_median'])}** "
                    f"({fmt(r.get('decode_tps_min'))}) tok/s | {prefill} | "
                    f"{fmt(r.get('short_ttft_median_s'), '{:.2f} s')} | {fmt(r.get('startup_s'), '{:.0f} s')} |")
@@ -389,7 +391,7 @@ def table(records):
 
 
 def prefill_table(records):
-    """Prompt reading by size (fresh random tokens), when the runs measured it."""
+    """Document reading by size, when the runs measured it."""
     sizes = sorted({int(n) for r in records for n, v in (r.get("prefill") or {}).items() if v.get("median")})
     if not sizes:
         return ""
@@ -525,7 +527,8 @@ class Bench:
         try:
             self.dir = self.resume_dir or new_run_dir()
             if not self.resume_dir:
-                (self.dir / PLAN).write_text(json.dumps({"workload": self.workload, "runs": self.runs}, indent=1))
+                (self.dir / PLAN).write_text(json.dumps({"workload": self.workload, "protocol": PROTOCOL,
+                                                            "runs": self.runs}, indent=1))
             await svc.setup.check()                       # GPU, driver, CUDA, PyTorch and commit for the records
             facts = machine_facts(svc.setup.hw or {}, svc.host.kind, svc.gpu_display)
             st = facts["stack"]
@@ -670,7 +673,8 @@ class Bench:
         budget = m["vram_total"] - m["vram_used"] - svc.headroom(m) if card else r["vram_gb"] * GB
         plan = sizing.plan(r["quant"], budget, r["context"])
         rec = {"label": r["label"], "quant": r["quant"], "usable_gb": round(budget / GB, 2), "context": r["context"],
-               "nostage": r["nostage"], "workload": self.workload, "date": time.strftime("%Y-%m-%d %H:%M"),
+               "nostage": r["nostage"], "workload": self.workload, "protocol": PROTOCOL,
+               "date": time.strftime("%Y-%m-%d %H:%M"),
                "device_used_before_gb": round(m["vram_used"] / GB, 2), "card_total_gb": round(m["vram_total"] / GB, 2),
                "method": "uncapped card" if card else "engine cap (limit + guard)", **facts,
                "plan": {k: v for k, v in plan.items() if isinstance(v, (int, float, str, bool)) or v is None}}
@@ -743,7 +747,7 @@ class Bench:
         else:
             doc = s["document"]
             self.emit(f"  answers {fmt(s['decode'])} tok/s (min {fmt(s['decode_min'])})"
-                      + (f", document {doc['tps']:,} tok/s ({doc['tokens'] // 1000}K, fact "
+                      + (f", long document {doc['tps']:,} tok/s ({doc['tokens'] // 1000}K, codes "
                          f"{'found' if doc['found'] else 'MISSED'})" if doc else "")
                       + "".join(f", {int(n) // 1024}K {v:,.0f}" for n, v in s["prefill"].items())
                       + (f"; vs {rec['previous']['date']}: answers {rec['previous']['decode_pct']:+.1f}%"
@@ -751,46 +755,55 @@ class Bench:
         return rec
 
     async def workload_steps(self, client, r, rec, save):
+        """The original's benchmark.py over HTTP: the warm-up, then each trial's answer and documents, then the
+        retrieval test."""
         wl = WORKLOADS[self.workload]
 
         def check():
             if self.cancelled or self.yielded:
                 raise RuntimeError(self.why_stopped("stopped"))
-        if wl["warmup"]:
-            await asyncio.to_thread(client.answer, WARMUP)            # not scored
-        runs = []
-        for p in PROMPTS[:wl["answers"]]:
+
+        async def ask(text):
             check()
-            a = await asyncio.to_thread(client.answer, p)
+            a = await asyncio.to_thread(client.answer, text)
+            ok = a["ttft_s"] and a["prompt_tokens"]
+            a["prefill_tps"] = round(a["prompt_tokens"] / a["ttft_s"], 1) if ok else None
+            return a
+        for text in WARMUP:                                           # not scored
+            await ask(text)
+        answers, docs = [], {}
+        for trial in range(wl["trials"]):
+            a = await ask(ANSWER.format(t=trial))
             a.pop("answer")
-            runs.append(a)
-            self.emit(f"  answer {len(runs)}: {a['completion_tokens']:,} tokens at {fmt(a['decode_tps'])} tok/s")
-            rec["decode_runs"] = runs
+            answers.append(a)
+            rec["decode_runs"] = answers
             save()
-        rates = [a["decode_tps"] for a in runs if a["decode_tps"]]
+            read = []
+            for n in wl["documents"]:
+                if n + 1024 > r["context"]:
+                    continue
+                text = await asyncio.to_thread(client.document, DOC_HEAD.format(t=trial, size=n), n, DOC_TAIL)
+                d = await ask(text)
+                docs.setdefault(str(n), []).append(d["prefill_tps"])
+                rec["prefill"] = {k: {"median": statistics.median(v), "runs": v} for k, v in docs.items() if all(v)}
+                save()
+                read.append(f"{n // 1024}K {fmt(d['prefill_tps'], '{:,.0f}')}")
+            self.emit(f"  trial {trial + 1}: answer of {a['completion_tokens']:,} tokens at "
+                      f"{fmt(a['decode_tps'])} tok/s"
+                      + (f"; documents read at {', '.join(read)} tok/s" if read else ""))
+        rates = [a["decode_tps"] for a in answers if a["decode_tps"]]
         rec["decode_tps_median"] = round(statistics.median(rates), 2) if rates else None
         rec["decode_tps_min"] = min(rates) if rates else None
-        ttfts = [a["ttft_s"] for a in runs if a["ttft_s"]]
+        ttfts = [a["ttft_s"] for a in answers if a["ttft_s"]]
         rec["short_ttft_median_s"] = round(statistics.median(ttfts), 3) if ttfts else None
-        if wl["document"]:
-            check()
-            a = await asyncio.to_thread(client.answer, document(r["context"]))
-            a["needle_found"] = NEEDLE in a.pop("answer")
-            a["prefill_tps"] = round(a["prompt_tokens"] / a["ttft_s"], 1) if a["ttft_s"] else None
+        save()
+        if wl["retrieval"]:
+            n = min(RETRIEVAL_MAX, r["context"] - 2048)
+            text = await asyncio.to_thread(client.document, RETRIEVAL_HEAD, n, RETRIEVAL_TAIL, True)
+            a = await ask(text)
+            said = a.pop("answer")
+            a["codes_found"] = all(code in said for _, _, code in CODES)
             rec["long"] = a
-            self.emit(f"  document: {a['prompt_tokens']:,} tokens read at {fmt(a['prefill_tps'], '{:,.0f}')} tok/s, "
-                      f"fact {'found' if a['needle_found'] else 'MISSED'}")
-            save()
-        seed = int(time.time())
-        rec["prefill"] = {}
-        for n in wl["prefill"]:
-            if n + 1024 > r["context"]:
-                continue
-            rates = []
-            for i in range(wl["reps"]):
-                check()
-                rates.append(await asyncio.to_thread(client.read_prompt, n, seed + 1000 * n + i))
-            rec["prefill"][str(n)] = {"median": round(statistics.median(rates), 1),
-                                      "runs": [round(x, 1) for x in rates]}
-            self.emit(f"  prompt reading {n // 1024}K: {statistics.median(rates):,.0f} tok/s")
+            self.emit(f"  long document: {a['prompt_tokens']:,} tokens read at {fmt(a['prefill_tps'], '{:,.0f}')} "
+                      f"tok/s, {'all three codes found' if a['codes_found'] else 'codes MISSED'}")
             save()

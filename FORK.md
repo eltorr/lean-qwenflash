@@ -27,8 +27,8 @@ standalone commits that apply to the original too; see [Taking changes upstream]
 - **Benchmarks** ([guide](docs/manager.md#benchmarks), [run records](research/README.md)). The dashboard's
   Benchmark tab and `qwenflash bench` measure any configuration on this machine, including smaller cards emulated on a
   bigger one, and record the stack. A run steps aside while a game needs the GPU, and a benchmark cut short resumes.
-  The original's `benchmark.py` and the engine's `bench/sweep.py` are kept as they were; `qwenflash bench` uses the
-  sweep's prompt-reading protocol.
+  It measures the way the original's `benchmark.py` does (thinking off, greedy, his prompts and documents), so
+  results compare with MaxDevv's. `benchmark.py` and the engine's `bench/sweep.py` are kept as they were.
 - **Newer stack.** PyTorch 2.15 on CUDA 13.2, where the original installs PyTorch 2.11 on CUDA 12.8. Prefill is
   47-72% faster ([report](research/torch-2.15/REPORT.md)); it needs NVIDIA driver 595 or newer.
 - **Security** ([manager guide](docs/manager.md#security)):

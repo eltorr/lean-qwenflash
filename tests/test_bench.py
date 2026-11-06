@@ -65,13 +65,16 @@ class FakeEngine(http.server.BaseHTTPRequestHandler):
             return
         req = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         FakeEngine.bodies.append((self.path, req))
-        if self.path == "/generate":
-            self.send_events([{"text": "x", "meta_info": {"completion_tokens": i}} for i in range(1, 4)])
+        if self.path == "/tokenize":                        # a token for every 4 characters
+            data = json.dumps({"tokens": [0] * (len(req["prompt"]) // 4)}).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
         else:
             prompt = req["messages"][0]["content"]
-            reply = f"The password is {bench.NEEDLE}." if bench.NEEDLE in prompt else "Done."
-            self.send_events([{"choices": [{"delta": {"reasoning_content": "thinking"}}]}]
-                             + [{"choices": [{"delta": {"content": w + " "}}]} for w in reply.split()]
+            reply = " ".join(c for _, _, c in bench.CODES) if "access codes" in prompt else "Air in, thrust out."
+            self.send_events([{"choices": [{"delta": {"content": w + " "}}]} for w in reply.split()]
                              + [{"choices": [{"delta": {}}], "usage": {"prompt_tokens": len(prompt) // 4,
                                                                        "completion_tokens": 40}}])
 
@@ -186,7 +189,8 @@ class BenchTests(unittest.TestCase):
         self.assertIsNone(r.get("error"), r.get("error"))
         self.assertEqual(r["label"], "3.05-card-64k")
         self.assertGreater(r["decode_tps_median"], 0)
-        self.assertEqual(set(r["prefill"]), {"8192", "32768"})
+        self.assertEqual(set(r["prefill"]), {"1024", "8192"})
+        self.assertEqual(r["protocol"], "benchmark.py")
         self.assertEqual(r["engine"]["slots"], 1234)
         self.assertEqual(r["engine"]["picks_vram_pct"], 90.0)
         self.assertEqual(r["stack"], {"torch": "2.15.0+cu132", "cuda": "13.2", "driver": "617.14", "commit": "abcdef0"})
@@ -197,18 +201,29 @@ class BenchTests(unittest.TestCase):
         self.assertEqual(int(env["QWEN_VRAM_LIMIT_BYTES"]), int(32e9 - 3.2e9))    # the whole card, as full runs
         self.assertEqual(self.svc.host.state, "stopped")                       # no benchmark server left behind
 
-    def test_output_is_never_capped(self):
+    def test_answers_follow_the_original_benchmark_and_are_never_capped(self):
         self.run_bench(["current"], "standard")
-        for path, body in FakeEngine.bodies:
-            self.assertNotIn("max_tokens", body, path)
-            self.assertNotIn("max_new_tokens", body.get("sampling_params", {}), path)
+        chats = [body for path, body in FakeEngine.bodies if path == "/v1/chat/completions"]
+        self.assertEqual(chats[0]["messages"][0]["content"], "Compute 17 times 23. Reply with only the number.")
+        for body in chats:
+            self.assertNotIn("max_tokens", body)
+            self.assertEqual(body["temperature"], 0)                            # greedy, as benchmark.py
+            self.assertIs(body["chat_template_kwargs"]["enable_thinking"], False)
+        docs = [b["messages"][0]["content"] for b in chats if "document 8192" in b["messages"][0]["content"]]
+        self.assertEqual(len(docs), 3)                                          # one per trial
+        self.assertTrue(docs[0].startswith("Trial 0, document 8192: Read the following document.\nThe fox"))
+        self.assertTrue(docs[0].endswith("\nNow write exactly one sentence explaining why the sky is blue."))
+        self.assertNotEqual(docs[0][:10], docs[1][:10])                         # nothing from the prefix cache
+        self.assertAlmostEqual(len(docs[0]) // 4, 8192 - 40, delta=30)          # sized in tokens
 
-    def test_the_standard_workload_finds_the_fact_in_the_long_document(self):
+    def test_the_standard_workload_finds_the_codes_in_the_long_document(self):
         r = self.run_bench(["current"], "standard").records[0]
-        self.assertTrue(r["long"]["needle_found"])
-        self.assertEqual(len(r["decode_runs"]), 5)
+        self.assertIsNone(r.get("error"), r.get("error"))
+        self.assertTrue(r["long"]["codes_found"])
+        self.assertAlmostEqual(r["long"]["prompt_tokens"], 65536 - 2048 - 40, delta=60)  # sized to the context
+        self.assertEqual(len(r["decode_runs"]), 3)
         self.assertEqual(len(r["prefill"]["8192"]["runs"]), 3)
-        self.assertNotIn("65536", r["prefill"])                 # doesn't fit in a 64K context
+        self.assertEqual(set(r["prefill"]), {"1024", "8192", "32768"})          # 64K doesn't fit in a 64K context
 
     def test_an_emulated_card_gets_its_limit_guard_and_settings(self):
         self.run_bench(["3.05:10.5:131072:nostage:ram=12"])

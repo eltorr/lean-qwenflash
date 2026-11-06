@@ -14,15 +14,16 @@ Every benchmark behind the numbers in this repo, newest first. Each folder has a
 ## Adding a run
 
 1. **Run it** with [`qwenflash bench`](../docs/manager.md#benchmarks), or from the dashboard's Benchmark tab. The
-   manager frees the GPU and puts the model back afterwards. Every answer runs to its natural end.
+   manager frees the GPU and puts the model back afterwards. It measures the way the original's `benchmark.py` does
+   (thinking off, greedy, his prompts), and every answer runs to its natural end.
 
    ```
    qwenflash bench matrix --out research/NAME/results      the README's table: 8-32 GB cards on a 32 GB one
    qwenflash bench quants --out research/NAME/results      3.05 and 4.05 bpw on this card
    ```
 
-   Each result records the machine and its stack (GPU, driver, CUDA, PyTorch, commit). The matrix takes about a
-   day. A run steps aside while a game needs the GPU, and `qwenflash bench --resume` continues a benchmark cut short.
+   Each result records the machine and its stack (GPU, driver, CUDA, PyTorch, commit). The matrix takes about 2
+   hours. A run steps aside while a game needs the GPU, and `qwenflash bench --resume` continues a benchmark cut short.
 2. **Tables:** `qwenflash bench --table research/NAME/results` prints the report's tables, and `--sizing` prints the
    rows for `sizing.MEASURED`. Then `python sizing.py presets --write README.md` regenerates the README's tables.
 3. **Record:** write the folder's `REPORT.md`, and add a row here with the date, machine and stack.
