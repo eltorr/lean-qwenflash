@@ -50,6 +50,9 @@ From two security reviews of the fork's code.
   - the manager frees the GPU for it and puts the model back afterwards;
   - each result records the machine and its stack, and the change since the last run of the same configuration;
   - prompt reading follows the engine's `sweep.py` protocol (fresh random tokens at 8K-64K).
+- **The PC comes first:** when a game or another app needs the GPU, or RAM nearly runs out, the run steps aside and
+  starts again once the PC is free. A benchmark cut short by a cancel, a restart or a reboot resumes where it stopped
+  (`qwenflash bench --resume`, or the tab's Resume button).
 - **Output is never capped:** the old runner cut answers at 400-1,500 tokens.
 - **Run records:** [research/README.md](research/README.md) lists every benchmark with its date, machine and stack.
 

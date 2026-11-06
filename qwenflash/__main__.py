@@ -263,16 +263,24 @@ def cmd_bench(cfg, a):
             print("\nPrompt reading (fresh random tokens):\n\n" + p)
         return 0
     if a.list:
-        for h in bench.history(50):
+        print("Presets:")
+        for name, what in bench.PRESETS.items():
+            print(f"  {name:<8} {what}")
+        past = bench.history(50)
+        print("\nEarlier results:" if past else f"\nNo earlier results in {bench.BENCH_DIR}")
+        for h in past:
             print(f"  {h['name']}  {h['runs']:>2} run(s)  {bench.BENCH_DIR / h['name']}")
         return 0
+    if a.resume and a.runs:
+        print("--resume continues the last benchmark's own runs; leave the runs out")
+        return 2
     runs = a.runs or ["current"]
     base = service_url(cfg) + "api/"
     try:
         http_get_json(base + "status", 3, auth(cfg))
     except Exception:  # noqa: BLE001 - not running: benchmark here
         return bench_here(cfg, a, runs)
-    r = post_json(base + "bench", {"runs": runs, "workload": a.workload}, auth(cfg))
+    r = post_json(base + "bench", {"runs": runs, "workload": a.workload, "resume": a.resume}, auth(cfg))
     print(r.get("message"))
     if not r.get("ok"):
         return 2
@@ -310,7 +318,7 @@ def bench_here(cfg, a, runs):
             if svc.mon.get():
                 break
             await asyncio.sleep(0.25)
-        ok, msg = svc.bench.start(runs, a.workload)
+        ok, msg = svc.bench.start(runs, a.workload, resume=a.resume)
         if not ok:
             print(msg)
             return None
@@ -363,11 +371,13 @@ def main(argv=None):
     b.add_argument("runs", nargs="*", help="presets: current (default), lean, quants, matrix; or "
                                            "QUANT:VRAM_GB|card:CONTEXT[:nostage][:ram=GIB]")
     b.add_argument("--workload", choices=("quick", "standard"), default="standard",
-                   help="quick: ~5 min a run; standard: ~15 min a run (default)")
+                   help="quick: ~15 min a run; standard: ~40-70 min a run (default; smaller cards take longer)")
+    b.add_argument("--resume", action="store_true",
+                   help="continue the latest unfinished benchmark: its runs left, into its folder")
     b.add_argument("--out", help="also write each run's JSON into this folder, e.g. research/NAME/results")
     b.add_argument("--table", metavar="FOLDER", help="print the report tables of a results folder")
     b.add_argument("--sizing", metavar="FOLDER", help="print sizing.MEASURED rows for a results folder")
-    b.add_argument("--list", action="store_true", help="list earlier results")
+    b.add_argument("--list", action="store_true", help="list the presets and earlier results")
     a = ap.parse_args(argv)
     cfg = config.load_config()
     if not config.CONFIG_PATH.exists():

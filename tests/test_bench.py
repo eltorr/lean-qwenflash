@@ -18,6 +18,7 @@ from qwenflash import bench, config  # noqa: E402
 from qwenflash.service import Service  # noqa: E402
 
 bench.SETTLE_S = 0
+bench.WATCH_S, bench.YIELD_AFTER_S = 0.02, 0.05
 KEY = "test-key"
 
 
@@ -107,9 +108,18 @@ class FakeService:
             "driver": {"version": "617.14"}, "repo": {"head": "abcdef0123"}})
         self.backend_key, self.backend_auth = KEY, {"X-QwenFlash-Key": KEY}
         self.be = types.SimpleNamespace(state="running", tier="full")
-        self.mon = types.SimpleNamespace(get=lambda: {"t": time.time(), "vram_total": 32e9, "vram_used": 2e9,
-                                                      "ram_avail": 50e9})
+        self.game = False                                   # another app has the GPU
+        self.mon = types.SimpleNamespace(get=self.sample)
         self.started, self.stopped = [], []
+
+    def sample(self):
+        busy = self.game() if callable(self.game) else self.game
+        return {"t": time.time(), "vram_total": 32e9, "vram_used": 2e9, "ram_avail": 50e9, "perproc_ded": 1e9,
+                "running": {"game.exe"} if busy else set(), "ext_util": 90.0 if busy else 0.0,
+                "ext_util_top": [["game.exe", 90]] if busy else []}
+
+    def ext_vram(self, m):
+        return 2e9
 
     async def _check(self):
         pass
@@ -223,6 +233,69 @@ class BenchTests(unittest.TestCase):
         b = self.run_bench(["current", "3.05:22:65536"], cancel_after=0.5)
         self.assertEqual([r.get("error") for r in b.records], ["cancelled"])
         self.assertEqual(self.svc.started, ["full"])
+
+    def test_a_run_steps_aside_for_the_pc_and_starts_again_once_it_is_free(self):
+        FakeEngine.slow = 0.1
+        self.svc.cfg["recover_after_s"] = 0.2
+        b = bench.Bench(self.svc)
+
+        async def go():
+            ok, msg = b.start(["current"], "quick")
+            self.assertTrue(ok, msg)
+            await asyncio.sleep(0.3)                        # mid-run, a game takes the GPU
+            self.svc.game = True
+            for _ in range(200):
+                if b.waiting:
+                    break
+                await asyncio.sleep(0.02)
+            self.assertEqual(b.waiting, ["GPU busy: game.exe at 90%"])
+            await asyncio.sleep(0.3)                        # still waiting while the game runs
+            self.assertEqual(len(self.svc.host.envs), 1)
+            self.svc.game = False
+            await b.task
+        asyncio.run(go())
+        lines = [x for _, x in b.out]
+        self.assertIn("  stepping aside: GPU busy: game.exe at 90%", lines)
+        self.assertIn("  the PC is free again", lines)
+        self.assertEqual(len(self.svc.host.envs), 2)                            # the run started again
+        r = b.records[0]
+        self.assertIsNone(r.get("error"), r.get("error"))
+        self.assertTrue(bench.counts(r))
+        self.assertEqual(self.svc.started, ["full"])
+        self.assertEqual(self.svc.host.state, "stopped")
+
+    def test_a_watched_app_counts_and_a_run_interrupted_too_often_is_recorded(self):
+        FakeEngine.slow = 0.1
+        self.svc.cfg.update(recover_after_s=0, watchlist=["Game.exe"], ext_util_pct=101)
+        self.svc.game = lambda: len(self.svc.host.envs) > 0 and self.svc.host.state == "running"   # every start
+        b = self.run_bench(["current"])
+        self.assertEqual(len(self.svc.host.envs), bench.MAX_YIELDS + 1)
+        r = b.records[0]
+        self.assertEqual(r["error"], "interrupted: watched app running: game.exe")
+        self.assertTrue(r["interrupted"])
+        self.assertFalse(bench.counts(r))                                       # resuming redoes it
+        self.assertEqual(bench.unfinished()[0], b.dir)
+
+    def test_a_benchmark_cut_short_resumes_where_it_stopped(self):
+        FakeEngine.slow = 0.2
+        first = self.run_bench(["current", "3.05:22:65536"], cancel_after=0.5)
+        self.assertEqual([r.get("error") for r in first.records], ["cancelled"])
+        self.assertEqual([r["label"] for r in bench.unfinished()[2]], ["3.05-card-64k", "3.05-22gb-64k"])
+        FakeEngine.slow = 0.0
+        b = bench.Bench(self.svc)
+
+        async def go():
+            ok, msg = b.start([], "standard", resume=True)
+            self.assertTrue(ok, msg)
+            self.assertIn("2 runs left, quick workload", msg)               # the benchmark's own workload
+            await b.task
+        asyncio.run(go())
+        self.assertEqual(b.dir, first.dir)
+        records = bench.load_records(b.dir)                                     # _plan.json isn't a result
+        self.assertEqual(sorted(r["label"] for r in records), ["3.05-22gb-64k", "3.05-card-64k"])
+        self.assertTrue(all(bench.counts(r) and not r.get("error") for r in records))
+        self.assertIsNone(bench.unfinished())
+        self.assertEqual(b.start([], resume=True), (False, "no unfinished benchmark to resume"))
 
     def test_requests_are_refused_while_it_runs(self):
         b = bench.Bench(self.svc)

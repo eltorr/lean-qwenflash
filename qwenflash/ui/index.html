@@ -279,15 +279,17 @@
   <section class="panel" id="p-bench">
     <p class="muted" style="margin-top:0">Measures this machine: starts the model in each configuration, generates answers to their
       natural end, and times prompt reading at fixed sizes. It takes the GPU: the model stops for the run, requests get an
-      error meanwhile, and the model comes back afterwards. <code>qwenflash bench</code> does the same from a terminal.</p>
+      error meanwhile, and the model comes back afterwards. When a game or another app needs the GPU or RAM, the run steps
+      aside and starts again once the PC is free. <code>qwenflash bench</code> does the same from a terminal.</p>
     <div class="benchbar local-only">
       <select id="benchRuns" aria-label="What to measure"></select>
       <select id="benchWorkload" aria-label="Workload">
-        <option value="quick">Quick · about 5 min a run</option>
-        <option value="standard">Standard · about 15 min a run</option>
+        <option value="quick">Quick · about 15 min a run</option>
+        <option value="standard">Standard · about an hour a run</option>
       </select>
       <button class="primary" id="benchStart">Start benchmark</button>
       <button id="benchCancel" style="display:none">Cancel</button>
+      <button id="benchResume" style="display:none">Resume</button>
       <span class="muted" id="benchMsg"></span>
     </div>
     <div class="benchbar"><span class="muted" id="benchWhich"></span><select id="benchHistory" aria-label="Earlier results"></select></div>
@@ -373,7 +375,7 @@ function renderStatus() {
   if (S.state === "running") meta += ` · ${sub}${S.budget_gb ? ` · <b>${S.budget_gb} GB</b> VRAM budget` : ""}${S.ram_cache_gib != null ? ` · ${S.ram_cache_gib} GiB RAM cache` : ""} · up ${dur(S.now - S.since)}${S.adopted ? " · kept across a manager restart" : S.startup_s ? ` · started in ${dur(S.startup_s)}` : ""}`;
   else if (S.state === "starting") meta += ` · starting ${S.tier} for ${dur(S.now - S.since)} (usually ~1 min)`;
   else if (S.state === "stopped") meta += ` · ${PAUSE_WHY[S.paused_reason] || "not loaded"}${S.idle_s != null ? "" : ""}`;
-  if (S.bench_running) meta += ` · <a href="#" onclick="showTab('bench');return false">benchmark running${S.bench_current ? ": " + esc(S.bench_current) : ""}</a>`;
+  if (S.bench_running) meta += ` · <a href="#" onclick="showTab('bench');return false">benchmark running${S.bench_current ? ": " + esc(S.bench_current) : ""}${S.bench_waiting ? " (waiting for the PC)" : ""}</a>`;
   const P = S.plans || {};
   if (P.full && P.lean) {
     meta += `<br><span class="muted">Fits now: full ${P.full.ok ? P.full.budget_gb + " GB" : "no"} · lean ${P.lean.ok ? P.lean.budget_gb + " GB" : "no"}` +
@@ -665,6 +667,9 @@ function renderBench(r) {
   if (!sel.options.length) sel.innerHTML = PRESET_ORDER.filter((k) => r.presets[k]).map((k) => `<option value="${k}">${esc(r.presets[k])}${k === "matrix" ? " · hours" : ""}</option>`).join("");
   $("benchStart").disabled = r.running || !!(S && S.setup_running);
   $("benchCancel").style.display = r.running ? "" : "none";
+  const rs = $("benchResume"), left = r.resumable ? r.resumable.left : 0;
+  rs.style.display = !r.running && left ? "" : "none";
+  rs.textContent = `Resume (${left} run${left === 1 ? "" : "s"} left)`;
   const hs = $("benchHistory"), names = (r.history || []).map((h) => h.name);
   if (hs.dataset.names !== names.join()) {
     hs.dataset.names = names.join();
@@ -672,7 +677,8 @@ function renderBench(r) {
   }
   hs.style.display = names.length > 1 && !r.running ? "" : "none";
   if (!benchShown && r.dir) hs.value = r.dir;
-  $("benchWhich").textContent = r.running ? `Running ${r.current || "…"} (${r.runs.indexOf(r.current) + 1} of ${r.runs.length}, ${r.workload} workload)`
+  $("benchWhich").textContent = r.running ? `Running ${r.current || "…"} (${r.runs.indexOf(r.current) + 1} of ${r.runs.length}, ${r.workload} workload)` +
+      (r.waiting ? ` · waiting for the PC: ${r.waiting.join("; ")}` : "")
     : (r.results.length ? `Results${r.dir ? " of " + runName(benchShown || r.dir) : ""}:` : "No results yet.");
   const sizes = [...new Set(r.results.flatMap((x) => Object.keys(x.prefill || {})))].sort((a, b) => a - b);
   const head = `<tr><th>Run</th><th>Answers (median)</th><th>Long document</th>${sizes.map((n) => `<th>Read ${n / 1024}K</th>`).join("")}` +
@@ -720,6 +726,12 @@ $("benchStart").onclick = async () => {
   if (!confirm(`Start the benchmark (${$("benchRuns").selectedOptions[0].text}, ${wl} workload)? The model stops while it runs, and clients get an error until it's done.`)) return;
   benchShown = null; benchSeq = 0;
   const r = await api("bench", { runs: [$("benchRuns").value], workload: wl });
+  $("benchMsg").textContent = r.message || ""; pollBench();
+};
+$("benchResume").onclick = async () => {
+  if (!confirm("Resume the benchmark? The model stops while it runs, and clients get an error until it's done.")) return;
+  benchShown = null; benchSeq = 0;
+  const r = await api("bench", { resume: true });
   $("benchMsg").textContent = r.message || ""; pollBench();
 };
 $("benchCancel").onclick = async () => { const r = await api("bench/cancel", {}); $("benchMsg").textContent = r.message || ""; };

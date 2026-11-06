@@ -79,7 +79,7 @@ class Monitor(threading.Thread):
     def run(self):
         while True:
             try:
-                s = self.svc.host.sample(own_busy=self.svc.in_flight > 0)
+                s = self.svc.host.sample(own_busy=self.svc.in_flight > 0 or self.svc.bench.running)
                 with self.lock:
                     self.latest = s
             except Exception as e:  # noqa: BLE001 - keep monitoring through transient counter errors
@@ -154,6 +154,9 @@ class Service:
     def ext_vram(self, m):
         if m.get("ext_vram_abs") is not None:
             return m["ext_vram_abs"]
+        b = self.bench.base
+        if b is not None:   # a benchmark's server: other apps used what was in use before it started, plus their growth
+            return max(0.0, min(m["vram_total"], b["vram_used"] + m["perproc_ded"] - b["perproc_ded"]))
         if self.perproc_at_start is None or self.be.state in ("stopped", "error"):
             return m["vram_used"]
         # Windows: per-process counters don't see WSL; other apps' change since our start is exact
@@ -832,6 +835,7 @@ class Service:
                        "host": cfg["remote_host"] or socket.gethostname().lower()},
             "setup_running": self.setup.running,
             "bench_running": self.bench.running, "bench_current": self.bench.current,
+            "bench_waiting": self.bench.waiting,
         }
 
     async def api(self, method, path, target, body, writer, local):
@@ -906,7 +910,7 @@ class Service:
                                                                        for x in runs):
                 await respond(writer, 400, {"ok": False, "message": "runs: a list of presets or run specs"})
                 return
-            ok, msg = self.bench.start(runs, str(data.get("workload", "standard")))
+            ok, msg = self.bench.start(runs, str(data.get("workload", "standard")), resume=data.get("resume") is True)
             await respond(writer, 200 if ok else 409, {"ok": ok, "message": msg})
         elif route == "bench/cancel" and method == "POST":
             ok, msg = await self.bench.cancel()

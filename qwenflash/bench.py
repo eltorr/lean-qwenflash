@@ -13,15 +13,23 @@ the expert cache, and QWEN_VRAM_GUARD_BYTES stops the server past it, as running
 smaller card's bandwidth can't be emulated, so real smaller cards are slower. ":nostage" forces staging-free prefill
 (1,536-token chunks); ":ram=GIB" sets the RAM cache (default: what the full profile would get now).
 
-Workloads. Every answer runs to its natural end; output is never capped:
-  quick     two answers, then prompt reading at 8K and 32K tokens                                  ~5 min a run
+Workloads. Every answer runs to its natural end; output is never capped, and answers of 5,000-10,000 tokens are
+common. Times are for a 32 GB card; smaller cards answer more slowly, so their runs take longer:
+  quick     two answers, then prompt reading at 8K and 32K tokens                                 ~15 min a run
   standard  a warm-up and five answers, a long document with one fact to find, then prompt
-            reading at 8K, 16K, 32K and 64K tokens (3 each)                                      ~15 min a run
+            reading at 8K, 16K, 32K and 64K tokens (3 each)                                  ~40-70 min a run
 Prompt reading uses fresh random tokens, so nothing comes from the prefix cache, timed to the first generated token
 (the protocol of qwen38-flash-offload/bench/sweep.py). The long document is natural text, as clients send it.
 
+The PC comes first. When a game or another app needs the GPU (a watched app, another app's GPU load, or its VRAM
+crowding the card) or RAM nearly runs out, the run steps aside: its server stops, the benchmark waits until the PC has
+been free for `recover_after_s`, then does that run again from the start. Finished runs are kept. A benchmark cut short
+(cancelled, the manager restarted, the PC rebooted) continues with `qwenflash bench --resume` or the tab's Resume
+button: the runs left go into the same folder.
+
 Results: one JSON per run in the settings folder (bench/<date-time>/), saved after every step, with the machine and
-its stack (GPU, driver, CUDA, PyTorch, commit) and the change since the last run of the same configuration.
+its stack (GPU, driver, CUDA, PyTorch, commit) and the change since the last run of the same configuration. The
+folder's _plan.json lists the benchmark's runs, for resuming.
 """
 import asyncio
 import collections
@@ -66,6 +74,11 @@ WARMUP = "Write a Python asyncio TCP port scanner with a concurrency limit, time
 NEEDLE = "violet-otter-42"
 TOKENS_PER_HELPER = 22.5            # measured: 4,200 filler functions = 94,466 prompt tokens
 SETTLE_S = 3                        # after stopping a server, before reading free VRAM
+WATCH_S = 1.0                       # how often a run checks whether the PC needs the GPU or RAM back
+YIELD_AFTER_S = 10                  # how long the PC must need them before the run steps aside
+MAX_YIELDS = 3                      # a run interrupted more often is recorded as interrupted (resume redoes it)
+RAM_FLOOR_GB = 1.0                  # free RAM below this: the PC is about to run out
+PLAN = "_plan.json"                 # the benchmark's runs and workload, for resuming (not a result)
 
 
 # ---------------------------------------------------------------------------------------------------------------- runs
@@ -93,7 +106,8 @@ def parse_run(spec):
             raise ValueError(f"unknown option {f!r} in {spec!r} (nostage, ram=GIB)")
     label = (f"{quant}-{'card' if vram_gb is None else f'{vram_gb:g}gb'}-{context // 1024}k"
              + ("-nostage" if nostage else "") + (f"-ram{ram}" if ram else ""))
-    return {"quant": quant, "vram_gb": vram_gb, "context": context, "nostage": nostage, "ram": ram, "label": label}
+    return {"quant": quant, "vram_gb": vram_gb, "context": context, "nostage": nostage, "ram": ram, "label": label,
+            "spec": ":".join(parts)}
 
 
 def expand(specs, cfg, lean_gb=None):
@@ -220,15 +234,42 @@ def machine_facts(hw, kind, display):
 
 
 # ------------------------------------------------------------------------------------------------------------- results
+def record_files(folder):
+    """The runs' JSON files in a results folder (not its _plan.json)."""
+    return [p for p in sorted(Path(folder).glob("*.json")) if not p.name.startswith("_")]
+
+
 def load_records(folder):
     """Every run's JSON in a results folder."""
     out = []
-    for p in sorted(Path(folder).glob("*.json")):
+    for p in record_files(folder):
         try:
-            out.append(json.loads(p.read_text()))
+            rec = json.loads(p.read_text())
         except (OSError, ValueError):
             continue
+        if isinstance(rec, dict) and rec.get("label"):
+            out.append(rec)
     return out
+
+
+def counts(rec):
+    """A run that needs no redoing: it finished, and wasn't cancelled or interrupted (a failure counts: it would fail
+    again)."""
+    return bool(rec.get("finished")) and not rec.get("interrupted") and rec.get("error") != "cancelled"
+
+
+def unfinished():
+    """The latest benchmark, if it has runs left: (folder, plan, runs left), else None."""
+    for h in history(50):
+        d = BENCH_DIR / h["name"]
+        try:
+            plan = json.loads((d / PLAN).read_text())
+        except (OSError, ValueError):
+            continue                                   # from before resuming existed
+        done = {r["label"] for r in load_records(d) if counts(r)}
+        left = [r for r in plan.get("runs") or [] if isinstance(r, dict) and r.get("label") not in done]
+        return (d, plan, left) if left else None
+    return None
 
 
 def new_run_dir():
@@ -247,7 +288,7 @@ def history(limit=12):
     if not BENCH_DIR.is_dir():
         return []
     dirs = sorted((d for d in BENCH_DIR.iterdir() if d.is_dir() and RUN_DIR.match(d.name)), reverse=True)
-    return [{"name": d.name, "runs": len(list(d.glob("*.json")))} for d in dirs[:limit]]
+    return [{"name": d.name, "runs": len(record_files(d))} for d in dirs[:limit]]
 
 
 def previous_record(rec, skip=None):
@@ -394,6 +435,10 @@ class Bench:
         self.runs, self.records = [], []
         self.workload = self.current = self.dir = self.task = None
         self.started = self.finished = None
+        self.planned = 0
+        self.resume_dir = None                 # the folder of the benchmark being continued
+        self.base = None                       # the GPU just before this run's server started: other apps' baseline
+        self.yielded = self.waiting = None     # why this run stepped aside; what the PC still needs
         self.echo = None                       # also print each line (`qwenflash bench` without the service)
         last = history(1)
         if last:                               # show the latest results after a restart
@@ -411,15 +456,20 @@ class Bench:
         records = self.records
         if name and name != (self.dir.name if self.dir else None):    # an earlier run, by its folder name
             records = load_records(BENCH_DIR / name) if RUN_DIR.match(name) and (BENCH_DIR / name).is_dir() else []
+        left = None if self.running else unfinished()
         return {"running": self.running, "workload": self.workload, "current": self.current,
                 "runs": [r["label"] for r in self.runs], "dir": self.dir.name if self.dir else None,
+                "waiting": self.waiting,
+                "resumable": {"dir": left[0].name, "left": len(left[2]), "workload": left[1].get("workload")}
+                if left else None,
                 "results": [summary(r) for r in records], "records": records,
                 "started": self.started, "finished": self.finished, "seq": self.seq,
                 "lines": [[n, t] for n, t in self.out if n > since][-800:],
                 "presets": PRESETS, "workloads": list(WORKLOADS), "history": history()}
 
-    def start(self, specs, workload="standard"):
-        """Check the request and start the benchmark in the background: (ok, message)."""
+    def start(self, specs, workload="standard", resume=False):
+        """Check the request and start the benchmark in the background: (ok, message). resume: continue the latest
+        unfinished benchmark instead (its runs left, into its folder, with its workload)."""
         svc = self.svc
         if self.running:
             return False, "a benchmark is already running"
@@ -427,21 +477,39 @@ class Bench:
             return False, "observe mode: this manager does not control the model"
         if svc.setup.running:
             return False, f"setup step '{svc.setup.running}' is running; try again when it finishes"
-        if workload not in WORKLOADS:
-            return False, f"unknown workload {workload!r} ({', '.join(WORKLOADS)})"
         m = svc.mon.get()
         if not m:
             return False, "no GPU reading yet; try again in a moment"
-        try:
-            runs = expand(specs, svc.cfg, lean_gb=min(svc.lean_budget(m), svc.full_budget(m)) / GB)
-        except ValueError as e:
-            return False, str(e)
+        folder, done = None, []
+        if resume:
+            left = unfinished()
+            if not left:
+                return False, "no unfinished benchmark to resume"
+            folder, plan, todo = left
+            workload = plan.get("workload")
+            try:
+                runs = [parse_run(r["spec"]) for r in todo]
+            except (KeyError, TypeError, ValueError) as e:
+                return False, f"can't resume {folder.name}: {e}"
+            labels = {r["label"] for r in runs}
+            done = [r for r in load_records(folder) if r["label"] not in labels]
+        if workload not in WORKLOADS:
+            return False, f"unknown workload {workload!r} ({', '.join(WORKLOADS)})"
+        if not resume:
+            try:
+                runs = expand(specs, svc.cfg, lean_gb=min(svc.lean_budget(m), svc.full_budget(m)) / GB)
+            except ValueError as e:
+                return False, str(e)
         self.running, self.cancelled = True, False
-        self.runs, self.records, self.workload = runs, [], workload
+        self.runs, self.records, self.workload, self.resume_dir = runs, done, workload, folder
+        self.planned = len(done) + len(runs)
         self.started, self.finished, self.current = time.time(), None, None
         self.out.clear()
         self.task = asyncio.create_task(self._run())
-        return True, f"benchmark started: {len(runs)} run{'s' if len(runs) > 1 else ''}, {workload} workload"
+        n = f"{len(runs)} run{'s' if len(runs) > 1 else ''}"
+        if folder:
+            return True, f"resuming the benchmark of {folder.name}: {n} left, {workload} workload"
+        return True, f"benchmark started: {n}, {workload} workload"
 
     async def cancel(self):
         if not self.running:
@@ -455,12 +523,16 @@ class Bench:
         svc = self.svc
         before = svc.be.tier if svc.be.state in ("running", "starting") else None
         try:
-            self.dir = new_run_dir()
+            self.dir = self.resume_dir or new_run_dir()
+            if not self.resume_dir:
+                (self.dir / PLAN).write_text(json.dumps({"workload": self.workload, "runs": self.runs}, indent=1))
             await svc.setup.check()                       # GPU, driver, CUDA, PyTorch and commit for the records
             facts = machine_facts(svc.setup.hw or {}, svc.host.kind, svc.gpu_display)
             st = facts["stack"]
-            self.emit(f"{len(self.runs)} run(s), {self.workload} workload, on {facts['host']['gpu']} "
-                      f"(driver {st['driver']}, CUDA {st['cuda']}, PyTorch {st['torch']}, commit {st['commit']})")
+            self.emit((f"resuming {self.dir.name} ({self.planned - len(self.runs)} of {self.planned} done): "
+                       if self.resume_dir else "")
+                      + f"{len(self.runs)} run(s), {self.workload} workload, on {facts['host']['gpu']} "
+                        f"(driver {st['driver']}, CUDA {st['cuda']}, PyTorch {st['torch']}, commit {st['commit']})")
             if svc.be.state != "stopped":
                 self.emit("stopping the model for the benchmark; requests get an error until it's done")
                 await svc.stop("benchmark", "benchmark")
@@ -468,20 +540,95 @@ class Bench:
                 if self.cancelled:
                     break
                 self.current = r["label"]
-                self.records.append(await self._one(r, facts))
+                for tries in range(1, MAX_YIELDS + 2):
+                    rec = await self._one(r, facts)
+                    if not rec.get("interrupted") or self.cancelled:
+                        break
+                    if tries > MAX_YIELDS:
+                        self.emit(f"  interrupted {tries} times; moving on (resuming the benchmark redoes it)")
+                        break
+                    await self.wait_for_pc()
+                self.records.append(rec)
         except Exception as e:  # noqa: BLE001 - report it, then restore the service
             log.exception("benchmark failed")
             self.emit(f"benchmark failed: {e}")
         finally:
-            self.current = None
+            self.current = self.base = self.waiting = None
             await asyncio.to_thread(svc.host.backend_stop)
             self.running, self.finished = False, time.time()
             done = sum(1 for r in self.records if not r.get("error"))
-            self.emit(f"{'cancelled' if self.cancelled else 'finished'}: {done} of {len(self.runs)} run(s) completed; "
-                      f"results in {self.dir}")
+            left = unfinished()
+            self.emit(f"{'cancelled' if self.cancelled else 'finished'}: {done} of {self.planned} run(s) completed; "
+                      f"results in {self.dir}"
+                      + (f"; {len(left[2])} left: `qwenflash bench --resume` or the Resume button runs them"
+                         if left and left[0] == self.dir else ""))
             if before:
                 self.emit(f"starting the model again ({before})")
                 await svc.start(before, "benchmark finished")
+
+    def why_stopped(self, default):
+        if self.cancelled:
+            return "cancelled"
+        if self.yielded:
+            return "interrupted: " + "; ".join(self.yielded)
+        return default
+
+    def disturbed(self, m):
+        """Why the PC needs the GPU or RAM back now ([] when it doesn't). The benchmark's own server never counts: on
+        Windows the per-app counters can't see WSL, and on Linux its processes are left out."""
+        cfg = self.svc.cfg
+        why = []
+        hits = sorted({w.lower() for w in cfg["watchlist"]} & set(m.get("running") or ()))
+        if hits:
+            why.append("watched app running: " + ", ".join(hits))
+        if m.get("ext_util", 0) >= cfg["ext_util_pct"]:
+            top = m.get("ext_util_top") or []
+            why.append(f"GPU busy: {top[0][0] if top else 'another app'} at {m['ext_util']:.0f}%")
+        if self.base is not None:
+            grew = self.svc.ext_vram(m) - self.base["ext"]
+            free = m["vram_total"] - m["vram_used"]
+            if grew > 0.75 * GB and free < cfg["vram_min_free_gb"] * GB:
+                why.append(f"other apps need VRAM (+{grew / GB:.1f} GB, {free / GB:.1f} GB free)")
+        if m["ram_avail"] < RAM_FLOOR_GB * GB:
+            why.append(f"RAM nearly out ({m['ram_avail'] / GB:.1f} GB free)")
+        return why
+
+    async def watch(self):
+        """While a run's server is up: once the PC has needed the GPU or RAM for YIELD_AFTER_S, stop the server. The
+        run is done again when the PC is free."""
+        since = None
+        while True:
+            await asyncio.sleep(WATCH_S)
+            m = self.svc.mon.get()
+            why = self.disturbed(m) if m else []
+            if not why:
+                since = None
+                continue
+            since = since or time.time()
+            if time.time() - since >= YIELD_AFTER_S:
+                self.yielded = why
+                self.emit("  stepping aside: " + "; ".join(why))
+                await asyncio.to_thread(self.svc.host.backend_stop)
+                return
+
+    async def wait_for_pc(self):
+        """After stepping aside: wait until the PC has been free for recover_after_s, or the benchmark is cancelled."""
+        need = self.svc.cfg["recover_after_s"]
+        self.waiting = self.yielded
+        self.emit(f"  waiting until the PC has been free for {need:g} s, then running {self.current} again")
+        clear = None
+        while not self.cancelled:
+            await asyncio.sleep(WATCH_S)
+            m = self.svc.mon.get()
+            why = self.disturbed(m) if m else ["no GPU reading"]
+            if why:
+                clear, self.waiting = None, why
+                continue
+            clear = clear or time.time()
+            if time.time() - clear >= need:
+                self.emit("  the PC is free again")
+                break
+        self.waiting = None
 
     def engine_env(self, r, plan, m, budget):
         """What the manager would pass the engine for this run (a capped run also gets the emulated card's guard)."""
@@ -513,9 +660,12 @@ class Bench:
     async def _one(self, r, facts):
         svc, cfg = self.svc, self.svc.cfg
         self.emit(f"=== {r['label']}")
+        self.yielded = None
         await asyncio.to_thread(svc.host.backend_stop)
         await asyncio.sleep(SETTLE_S)
         m = await svc.fresh_sample(time.time())
+        self.base = {"vram_used": m["vram_used"], "perproc_ded": m.get("perproc_ded", 0.0)}
+        self.base["ext"] = svc.ext_vram(m)
         card = r["vram_gb"] is None
         budget = m["vram_total"] - m["vram_used"] - svc.headroom(m) if card else r["vram_gb"] * GB
         plan = sizing.plan(r["quant"], budget, r["context"])
@@ -535,49 +685,60 @@ class Bench:
             rec["error"] = f"does not fit: {plan.get('reason')}"
         if rec.get("error"):
             self.emit(f"  skipped: {rec['error']}")
+            rec["finished"] = True
             save()
             return rec
         env, rec["ram_gib"] = self.engine_env(r, plan, m, budget)
         t0 = time.time()
         ok, pid = await asyncio.to_thread(svc.host.backend_start, env, ["server"])
-        up = False
-        if ok:
-            url = f"http://127.0.0.1:{cfg['backend_port']}/v1/models"
-            while time.time() - t0 < cfg["start_timeout_s"] and not self.cancelled:
-                if await asyncio.to_thread(http_ok, url, 2.0, svc.backend_auth):
-                    up = True
-                    break
+        watcher = asyncio.create_task(self.watch()) if ok else None
+        try:
+            up = False
+            if ok:
+                url = f"http://127.0.0.1:{cfg['backend_port']}/v1/models"
+                while time.time() - t0 < cfg["start_timeout_s"] and not self.cancelled and not self.yielded:
+                    if await asyncio.to_thread(http_ok, url, 2.0, svc.backend_auth):
+                        up = True
+                        break
+                    st, _ = await asyncio.to_thread(svc.host.backend_status)
+                    if st != "running":
+                        break
+                    await asyncio.sleep(2)
+            rec["startup_s"] = round(time.time() - t0, 1)
+            if up:
+                m2 = await svc.fresh_sample(time.time())
+                rec["model_vram_gb"] = round((m2["vram_used"] - m["vram_used"]) / GB, 2)
+                self.emit(f"  ready in {rec['startup_s']:.0f} s: {rec['model_vram_gb']:.1f} GB VRAM, "
+                          f"{rec['ram_gib']} GiB RAM cache")
+                save()
+                client = Client(cfg["backend_port"], svc.backend_key)
+                try:
+                    await self.workload_steps(client, r, rec, save)
+                    rec["engine"] = await asyncio.to_thread(client.engine_stats)
+                except Exception as e:  # noqa: BLE001 - one failed run must not end the others
+                    rec["error"] = self.why_stopped(f"workload failed: {e}")
                 st, _ = await asyncio.to_thread(svc.host.backend_status)
-                if st != "running":
-                    break
-                await asyncio.sleep(2)
-        rec["startup_s"] = round(time.time() - t0, 1)
-        if up:
-            m2 = await svc.fresh_sample(time.time())
-            rec["model_vram_gb"] = round((m2["vram_used"] - m["vram_used"]) / GB, 2)
-            self.emit(f"  ready in {rec['startup_s']:.0f} s: {rec['model_vram_gb']:.1f} GB VRAM, "
-                      f"{rec['ram_gib']} GiB RAM cache")
-            save()
-            client = Client(cfg["backend_port"], svc.backend_key)
-            try:
-                await self.workload_steps(client, r, rec, save)
-                rec["engine"] = await asyncio.to_thread(client.engine_stats)
-            except Exception as e:  # noqa: BLE001 - one failed run must not end the others
-                rec["error"] = "cancelled" if self.cancelled else f"workload failed: {e}"
-            st, _ = await asyncio.to_thread(svc.host.backend_status)
-            if st != "running" and not rec.get("error"):
-                rec["error"] = "the server exited during the workload"
-        else:
-            rec["error"] = ("cancelled" if self.cancelled else
-                            f"the server did not come up{'' if ok else f' (launcher: {pid})'}")
-        if rec.get("error") and svc.host.follower:
+                if st != "running" and not rec.get("error"):
+                    rec["error"] = "the server exited during the workload"
+            else:
+                rec["error"] = self.why_stopped(f"the server did not come up{'' if ok else f' (launcher: {pid})'}")
+        finally:
+            if watcher:
+                watcher.cancel()
+        if self.cancelled or self.yielded:                # whatever it managed, a run cut short isn't a result
+            rec["error"] = self.why_stopped("")
+            rec["interrupted"] = not self.cancelled
+        elif rec.get("error") and svc.host.follower:
             rec["log_tail"] = svc.host.follower.tail(8)
         await asyncio.to_thread(svc.host.backend_stop)
         if not rec.get("error"):
             rec["previous"] = compare(rec, previous_record(rec, skip=self.dir))
+        rec["finished"] = True
         save()
         s = summary(rec)
-        if rec.get("error"):
+        if rec.get("interrupted"):
+            pass                                          # stepping aside was reported; _run decides what's next
+        elif rec.get("error"):
             self.emit(f"  failed: {rec['error']}")
         else:
             doc = s["document"]
@@ -593,8 +754,8 @@ class Bench:
         wl = WORKLOADS[self.workload]
 
         def check():
-            if self.cancelled:
-                raise RuntimeError("cancelled")
+            if self.cancelled or self.yielded:
+                raise RuntimeError(self.why_stopped("stopped"))
         if wl["warmup"]:
             await asyncio.to_thread(client.answer, WARMUP)            # not scored
         runs = []

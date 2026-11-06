@@ -21,7 +21,8 @@ Every benchmark behind the numbers in this repo, newest first. Each folder has a
    qwenflash bench quants --out research/NAME/results      3.05 and 4.05 bpw on this card
    ```
 
-   Each result records the machine and its stack (GPU, driver, CUDA, PyTorch, commit).
+   Each result records the machine and its stack (GPU, driver, CUDA, PyTorch, commit). The matrix takes about a
+   day. A run steps aside while a game needs the GPU, and `qwenflash bench --resume` continues a benchmark cut short.
 2. **Tables:** `qwenflash bench --table research/NAME/results` prints the report's tables, and `--sizing` prints the
    rows for `sizing.MEASURED`. Then `python sizing.py presets --write README.md` regenerates the README's tables.
 3. **Record:** write the folder's `REPORT.md`, and add a row here with the date, machine and stack.
